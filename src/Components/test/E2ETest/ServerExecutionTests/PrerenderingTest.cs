@@ -9,6 +9,7 @@ using BasicTestApp;
 using Microsoft.AspNetCore.Components.E2ETest.Infrastructure;
 using Microsoft.AspNetCore.Components.E2ETest.Infrastructure.ServerFixtures;
 using Microsoft.AspNetCore.E2ETesting;
+using Microsoft.AspNetCore.Testing;
 using OpenQA.Selenium;
 using TestServer;
 using Xunit;
@@ -33,15 +34,15 @@ namespace Microsoft.AspNetCore.Components.E2ETest.ServerExecutionTests
             Navigate("/prerendered/prerendered-transition");
 
             // Prerendered output shows "not connected"
-            Browser.Equal("not connected", () => Browser.FindElement(By.Id("connected-state")).Text);
+            Browser.Equal("not connected", () => Browser.Exists(By.Id("connected-state")).Text);
 
             // Once connected, output changes
             BeginInteractivity();
-            Browser.Equal("connected", () => Browser.FindElement(By.Id("connected-state")).Text);
+            Browser.Equal("connected", () => Browser.Exists(By.Id("connected-state")).Text);
 
             // ... and now the counter works
-            Browser.FindElement(By.Id("increment-count")).Click();
-            Browser.Equal("1", () => Browser.FindElement(By.Id("count")).Text);
+            Browser.Exists(By.Id("increment-count")).Click();
+            Browser.Equal("1", () => Browser.Exists(By.Id("count")).Text);
         }
 
         [Fact]
@@ -50,7 +51,7 @@ namespace Microsoft.AspNetCore.Components.E2ETest.ServerExecutionTests
             Navigate("/prerendered/prerendered-async-disposal");
 
             // Prerendered output shows "not connected"
-            Browser.Equal("After async disposal", () => Browser.FindElement(By.Id("disposal-message")).Text);
+            Browser.Equal("After async disposal", () => Browser.Exists(By.Id("disposal-message")).Text);
         }
 
         [Fact]
@@ -59,14 +60,14 @@ namespace Microsoft.AspNetCore.Components.E2ETest.ServerExecutionTests
             Navigate("/prerendered/prerendered-interop");
 
             // Prerendered output can't use JSInterop
-            Browser.Equal("No value yet", () => Browser.FindElement(By.Id("val-get-by-interop")).Text);
-            Browser.Equal(string.Empty, () => Browser.FindElement(By.Id("val-set-by-interop")).GetAttribute("value"));
+            Browser.Equal("No value yet", () => Browser.Exists(By.Id("val-get-by-interop")).Text);
+            Browser.Equal(string.Empty, () => Browser.Exists(By.Id("val-set-by-interop")).GetAttribute("value"));
 
             BeginInteractivity();
 
             // Once connected, we can
-            Browser.Equal("Hello from interop call", () => Browser.FindElement(By.Id("val-get-by-interop")).Text);
-            Browser.Equal("Hello from interop call", () => Browser.FindElement(By.Id("val-set-by-interop")).GetAttribute("value"));
+            Browser.Equal("Hello from interop call", () => Browser.Exists(By.Id("val-get-by-interop")).Text);
+            Browser.Equal("Hello from interop call", () => Browser.Exists(By.Id("val-set-by-interop")).GetAttribute("value"));
         }
 
         [Fact]
@@ -74,56 +75,11 @@ namespace Microsoft.AspNetCore.Components.E2ETest.ServerExecutionTests
         {
             Navigate("/prerendered/WithLazyAssembly");
 
-            var button = Browser.FindElement(By.Id("use-package-button"));
+            var button = Browser.Exists(By.Id("use-package-button"));
 
             button.Click();
 
             AssertLogDoesNotContainCriticalMessages("Could not load file or assembly 'Newtonsoft.Json");
-        }
-
-        [Fact]
-        public void CanInfluenceHeadDuringPrerender()
-        {
-            Navigate("/prerendered/prerendered-head");
-
-            var metaWithBindings = Browser.FindElement(By.Id("meta-with-bindings"));
-            var metaNoBindings = Browser.FindElement(By.Id("meta-no-bindings"));
-
-            // Validate updated head during prerender
-            Browser.Equal("Initial title", () => Browser.Title);
-            Browser.Equal("Initial meta content", () => metaWithBindings.GetAttribute("content"));
-            Browser.Equal("Immutable meta content", () => metaNoBindings.GetAttribute("content"));
-
-            BeginInteractivity();
-
-            // Wait for elements to be recreated with internal ids to permit mutation
-            metaWithBindings = WaitForNewElement(metaWithBindings, "meta-with-bindings");
-            metaNoBindings = WaitForNewElement(metaNoBindings, "meta-no-bindings");
-
-            // Validate updated head after prerender
-            Browser.Equal("Initial title", () => Browser.Title);
-            Browser.Equal("Initial meta content", () => metaWithBindings.GetAttribute("content"));
-            Browser.Equal("Immutable meta content", () => metaNoBindings.GetAttribute("content"));
-
-            // Change parameter of meta component
-            var inputMetaBinding = Browser.FindElement(By.Id("input-meta-binding"));
-            inputMetaBinding.Clear();
-            inputMetaBinding.SendKeys("Updated meta content\n");
-
-            // Wait for meta tag to be recreated with new attributes
-            metaWithBindings = WaitForNewElement(metaWithBindings, "meta-with-bindings");
-
-            // Validate new meta content attribute
-            Browser.Equal("Updated meta content", () => metaWithBindings.GetAttribute("content"));
-
-            IWebElement WaitForNewElement(IWebElement existingElement, string id)
-            {
-                var newElement = existingElement;
-
-                Browser.NotEqual(existingElement, () => newElement = Browser.FindElement(By.Id(id)) ?? newElement);
-
-                return newElement;
-            }
         }
 
         [Fact]
@@ -137,13 +93,13 @@ namespace Microsoft.AspNetCore.Components.E2ETest.ServerExecutionTests
             Navigate(url);
             Browser.Equal(
                 _serverFixture.RootUri + urlWithoutHash,
-                () => Browser.FindElement(By.TagName("strong")).Text);
+                () => Browser.Exists(By.TagName("strong")).Text);
 
             // Once connected, you do have access to the full URL
             BeginInteractivity();
             Browser.Equal(
                 _serverFixture.RootUri + url,
-                () => Browser.FindElement(By.TagName("strong")).Text);
+                () => Browser.Exists(By.TagName("strong")).Text);
         }
 
         [Theory]
@@ -174,17 +130,17 @@ namespace Microsoft.AspNetCore.Components.E2ETest.ServerExecutionTests
             // See that the authentication state is usable during the initial prerendering
             SignInAs(initialUsername, null);
             Navigate("/prerendered/prerendered-transition");
-            Browser.Equal($"Hello, {initialUsername ?? "anonymous"}!", () => Browser.FindElement(By.TagName("h1")).Text);
+            Browser.Equal($"Hello, {initialUsername ?? "anonymous"}!", () => Browser.Exists(By.TagName("h1")).Text);
 
             // See that during connection, we update to whatever the latest authentication state now is
             SignInAs(interactiveUsername, null, useSeparateTab: true);
             BeginInteractivity();
-            Browser.Equal($"Hello, {interactiveUsername ?? "anonymous"}!", () => Browser.FindElement(By.TagName("h1")).Text);
+            Browser.Equal($"Hello, {interactiveUsername ?? "anonymous"}!", () => Browser.Exists(By.TagName("h1")).Text);
         }
 
         private void BeginInteractivity()
         {
-            Browser.FindElement(By.Id("load-boot-script")).Click();
+            Browser.Exists(By.Id("load-boot-script")).Click();
         }
 
         private void AssertLogDoesNotContainCriticalMessages(params string[] messages)

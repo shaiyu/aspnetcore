@@ -198,9 +198,6 @@
   <data name="BadRequest_UnrecognizedHTTPVersion" xml:space="preserve">
     <value>Unrecognized HTTP version: '{detail}'</value>
   </data>
-  <data name="BadRequest_UpgradeRequestCannotHavePayload" xml:space="preserve">
-    <value>Requests with 'Connection: Upgrade' cannot have content in the request body.</value>
-  </data>
   <data name="FallbackToIPv4Any" xml:space="preserve">
     <value>Failed to bind to http://[::]:{port} (IPv6Any). Attempting to bind to http://0.0.0.0:{port} instead.</value>
   </data>
@@ -262,10 +259,10 @@
     <value>Unable to bind to {address} on the {interfaceName} interface: '{error}'.</value>
   </data>
   <data name="OverridingWithKestrelOptions" xml:space="preserve">
-    <value>Overriding address(es) '{addresses}'. Binding to endpoints defined in {methodName} instead.</value>
+    <value>Overriding address(es) '{addresses}'. Binding to endpoints defined via IConfiguration and/or UseKestrel() instead.</value>
   </data>
   <data name="OverridingWithPreferHostingUrls" xml:space="preserve">
-    <value>Overriding endpoints defined in UseKestrel() because {settingName} is set to true. Binding to address(es) '{addresses}' instead.</value>
+    <value>Overriding endpoints defined via IConfiguration and/or UseKestrel() because {settingName} is set to true. Binding to address(es) '{addresses}' instead.</value>
   </data>
   <data name="UnsupportedAddressScheme" xml:space="preserve">
     <value>Unrecognized scheme in server address '{address}'. Only 'http://' and 'https://' are supported.</value>
@@ -557,8 +554,8 @@ For more information on configuring HTTPS see https://go.microsoft.com/fwlink/?l
   <data name="Http2ErrorStreamAborted" xml:space="preserve">
     <value>A frame of type {frameType} was received after stream {streamId} was reset or aborted.</value>
   </data>
-  <data name="Http2MinDataRateNotSupported" xml:space="preserve">
-    <value>This feature is not supported for HTTP/2 requests except to disable it entirely by setting the rate to null.</value>
+  <data name="HttpMinDataRateNotSupported" xml:space="preserve">
+    <value>This feature is not supported for HTTP/2 and HTTP/3 requests except to disable it entirely by setting the rate to null.</value>
   </data>
   <data name="RequestTrailersNotAvailable" xml:space="preserve">
     <value>The request trailers are not available yet. They may not be available until the full request body is read.</value>
@@ -619,5 +616,68 @@ For more information on configuring HTTPS see https://go.microsoft.com/fwlink/?l
   </data>
   <data name="UnrecognizedCertificateKeyOid" xml:space="preserve">
     <value>Unknown algorithm for certificate with public key type '{0}'.</value>
+  </data>
+  <data name="SniNotConfiguredForServerName" xml:space="preserve">
+    <value>Connection refused because no SNI configuration section was found for '{serverName}' in '{endpointName}'. To allow all connections, add a wildcard ('*') SNI section.</value>
+  </data>
+  <data name="SniNotConfiguredToAllowNoServerName" xml:space="preserve">
+    <value>Connection refused because the client did not specify a server name, and no wildcard ('*') SNI configuration section was found in '{endpointName}'.</value>
+  </data>
+  <data name="SniNameCannotBeEmpty" xml:space="preserve">
+    <value>The endpoint {endpointName} is invalid because an SNI configuration section has an empty string as its key. Use a wildcard ('*') SNI section to match all server names.</value>
+  </data>
+  <data name="EndpointHasUnusedHttpsConfig" xml:space="preserve">
+    <value>The non-HTTPS endpoint {endpointName} includes HTTPS-only configuration for {keyName}.</value>
+  </data>
+  <data name="FoundCertWithPrivateKey" xml:space="preserve">
+    <value>Found certificate with private key and thumbprint {Thumbprint} in certificate store {StoreName}.</value>
+  </data>
+  <data name="LocatingCertWithPrivateKey" xml:space="preserve">
+    <value>Searching for certificate with private key and thumbprint {Thumbprint} in the certificate store.</value>
+  </data>
+  <data name="FailedToLocateCertificateFromStore" xml:space="preserve">
+    <value>Failure to locate certificate from store.</value>
+  </data>
+  <data name="FailedToOpenCertStore" xml:space="preserve">
+    <value>Failed to open certificate store {StoreName}.</value>
+  </data>
+  <data name="Http3ConnectionFaulted" xml:space="preserve">
+    <value>The HTTP/3 connection faulted.</value>
+  </data>
+  <data name="Http3StreamAborted" xml:space="preserve">
+    <value>The HTTP/3 request stream was aborted.</value>
+  </data>
+  <data name="Http3StreamResetByApplication" xml:space="preserve">
+    <value>The HTTP/3 stream was reset by the application with error code {errorCode}.</value>
+  </data>
+  <data name="Http3StreamErrorAfterHeaders" xml:space="preserve">
+    <value>An error occurred after the response headers were sent, a reset is being sent.</value>
+  </data>
+  <data name="Http3StreamErrorDataReceivedBeforeHeaders" xml:space="preserve">
+    <value>The client sent a DATA frame to a request stream before the HEADERS frame.</value>
+  </data>
+  <data name="Http3StreamErrorFrameReceivedAfterTrailers" xml:space="preserve">
+    <value>The client sent a {frameType} frame after trailing HEADERS.</value>
+  </data>
+  <data name="Http3ErrorUnsupportedFrameOnRequestStream" xml:space="preserve">
+    <value>The client sent a {frameType} frame to a request stream which isn't supported.</value>
+  </data>
+  <data name="Http3ErrorUnsupportedFrameOnServer" xml:space="preserve">
+    <value>The client sent a {frameType} frame to the server which isn't supported.</value>
+  </data>
+  <data name="Http3ErrorUnsupportedFrameOnControlStream" xml:space="preserve">
+    <value>The client sent a {frameType} frame to a control stream which isn't supported.</value>
+  </data>
+  <data name="Http3ErrorControlStreamMultipleSettingsFrames" xml:space="preserve">
+    <value>The client sent a SETTINGS frame to a control stream that already has settings.</value>
+  </data>
+  <data name="Http3ErrorControlStreamFrameReceivedBeforeSettings" xml:space="preserve">
+    <value>The client sent a {frameType} frame to a control stream before the SETTINGS frame.</value>
+  </data>
+  <data name="Http3ErrorControlStreamReservedSetting" xml:space="preserve">
+    <value>The client sent a reserved setting identifier: {identifier}</value>
+  </data>
+  <data name="Http3ControlStreamErrorMultipleInboundStreams" xml:space="preserve">
+    <value>The client created multiple inbound {streamType} streams for the connection.</value>
   </data>
 </root>

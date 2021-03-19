@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -109,14 +110,14 @@ namespace Microsoft.AspNetCore.Server.HttpSys
             return host;
         }
 
-        internal static MessagePump CreatePump()
-            => new MessagePump(Options.Create(new HttpSysOptions()), new LoggerFactory(), new AuthenticationSchemeProvider(Options.Create(new AuthenticationOptions())));
+        internal static MessagePump CreatePump(ILoggerFactory loggerFactory = null)
+            => new MessagePump(Options.Create(new HttpSysOptions()), loggerFactory ?? new LoggerFactory(), new AuthenticationSchemeProvider(Options.Create(new AuthenticationOptions())));
 
-        internal static MessagePump CreatePump(Action<HttpSysOptions> configureOptions)
+        internal static MessagePump CreatePump(Action<HttpSysOptions> configureOptions, ILoggerFactory loggerFactory = null)
         {
             var options = new HttpSysOptions();
             configureOptions(options);
-            return new MessagePump(Options.Create(options), new LoggerFactory(), new AuthenticationSchemeProvider(Options.Create(new AuthenticationOptions())));
+            return new MessagePump(Options.Create(options), loggerFactory ?? new LoggerFactory(), new AuthenticationSchemeProvider(Options.Create(new AuthenticationOptions())));
         }
 
         internal static IServer CreateDynamicHttpServer(string basePath, out string root, out string baseAddress, Action<HttpSysOptions> configureOptions, RequestDelegate app)
@@ -134,12 +135,12 @@ namespace Microsoft.AspNetCore.Server.HttpSys
             return server;
         }
 
-        internal static IServer CreateDynamicHttpsServer(out string baseAddress, RequestDelegate app)
+        internal static IServer CreateDynamicHttpsServer(out string baseAddress, RequestDelegate app, ILoggerFactory loggerFactory = null)
         {
-            return CreateDynamicHttpsServer("/", out var root, out baseAddress, options => { }, app);
+            return CreateDynamicHttpsServer("/", out var root, out baseAddress, options => { }, app, loggerFactory);
         }
 
-        internal static IServer CreateDynamicHttpsServer(string basePath, out string root, out string baseAddress, Action<HttpSysOptions> configureOptions, RequestDelegate app)
+        internal static IServer CreateDynamicHttpsServer(string basePath, out string root, out string baseAddress, Action<HttpSysOptions> configureOptions, RequestDelegate app, ILoggerFactory loggerFactory = null)
         {
             lock (PortLock)
             {
@@ -150,7 +151,7 @@ namespace Microsoft.AspNetCore.Server.HttpSys
                     root = prefix.Scheme + "://" + prefix.Host + ":" + prefix.Port;
                     baseAddress = prefix.ToString();
 
-                    var server = CreatePump();
+                    var server = CreatePump(loggerFactory);
                     server.Features.Get<IServerAddressesFeature>().Addresses.Add(baseAddress);
                     configureOptions(server.Listener.Options);
                     try
@@ -170,5 +171,10 @@ namespace Microsoft.AspNetCore.Server.HttpSys
         internal static Task WithTimeout(this Task task) => task.TimeoutAfter(DefaultTimeout);
 
         internal static Task<T> WithTimeout<T>(this Task<T> task) => task.TimeoutAfter(DefaultTimeout);
+
+        internal static bool? CanHaveBody(this HttpRequest request)
+        {
+            return request.HttpContext.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody;
+        }
     }
 }

@@ -11,7 +11,7 @@ namespace Microsoft.AspNetCore.Components.Forms
     /// <summary>
     /// Groups child <see cref="InputRadio{TValue}"/> components.
     /// </summary>
-    public class InputRadioGroup<TValue> : InputBase<TValue>
+    public class InputRadioGroup<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TValue> : InputBase<TValue>
     {
         private readonly string _defaultGroupName = Guid.NewGuid().ToString("N");
         private InputRadioContext? _context;
@@ -43,15 +43,16 @@ namespace Microsoft.AspNetCore.Components.Forms
         {
             Debug.Assert(_context != null);
 
-            builder.OpenComponent<CascadingValue<InputRadioContext>>(2);
-            builder.AddAttribute(3, "IsFixed", true);
-            builder.AddAttribute(4, "Value", _context);
-            builder.AddAttribute(5, "ChildContent", ChildContent);
+            builder.OpenComponent<CascadingValue<InputRadioContext>>(0);
+            builder.SetKey(_context);
+            builder.AddAttribute(1, "IsFixed", true);
+            builder.AddAttribute(2, "Value", _context);
+            builder.AddAttribute(3, "ChildContent", ChildContent);
             builder.CloseComponent();
         }
 
         /// <inheritdoc />
-        protected override bool TryParseValueFromString(string? value, [MaybeNull] out TValue result, [NotNullWhen(false)] out string? validationErrorMessage)
+        protected override bool TryParseValueFromString(string? value, [MaybeNullWhen(false)] out TValue result, [NotNullWhen(false)] out string? validationErrorMessage)
             => this.TryParseSelectableValueFromString(value, out result, out validationErrorMessage);
     }
 }

@@ -2,33 +2,47 @@
 
   <!-- For 'legacy' .csproj files, set map TargetFrameworkVersion back to TargetFramework -->
   <PropertyGroup Condition=" '$(TargetFramework)' == '' AND '$(TargetFrameworks)' == '' ">
-    <TargetFramework>net$(TargetFrameworkVersion.Substring(1).Replace('.',''))</TargetFramework>
+    <TargetFramework>net$(TargetFrameworkVersion.TrimStart('vV').Replace('.',''))</TargetFramework>
     <TargetFrameworkIdentifier>.NETFramework</TargetFrameworkIdentifier>
   </PropertyGroup>
 
-  <!-- Ensure API changes show up clearly in PRs. -->
   <PropertyGroup>
-    <_TFMDirectory>$(TargetFramework)</_TFMDirectory>
-    <_TFMDirectory Condition=" '$(TargetFramework)' == '$(DefaultNetCoreTargetFramework)' ">netcoreapp</_TFMDirectory>
+    <!-- Ensure API changes show up clearly in PRs. -->
+    <AddPublicApiAnalyzers Condition=" '$(AddPublicApiAnalyzers)' == '' AND
+        '$(IsImplementationProject)' == 'true' AND
+        ! $(RepoRelativeProjectDir.Contains('Tools')) ">true</AddPublicApiAnalyzers>
+    <AddPublicApiAnalyzers Condition=" '$(AddPublicApiAnalyzers)' == '' ">false</AddPublicApiAnalyzers>
 
     <!-- Public members should not use oblivious types. Not done with all nullable annotations. -->
     <NoWarn>$(NoWarn);RS0041</NoWarn>
-  </PropertyGroup>
-  <ItemGroup Condition=" '$(IsImplementationProject)' == 'true' AND
-      '$(DotNetBuildFromSource)' != 'true' AND
-      ! $(RepoRelativeProjectDir.Contains('Tools')) ">
-    <!-- Package does nothing in projects lacking PublicAPI.Shipped.txt or PublicAPI.Unshipped.txt files. -->
-    <Reference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" ExcludeAssets="Compile" PrivateAssets="All" />
 
-    <AdditionalFiles Include="PublicAPI.Shipped.txt"
-        Condition=" Exists('$(MSBuildProjectDirectory)\PublicAPI.Shipped.txt') " />
-    <AdditionalFiles Include="PublicAPI.Unshipped.txt"
-        Condition=" Exists('$(MSBuildProjectDirectory)\PublicAPI.Unshipped.txt') " />
-    <AdditionalFiles Include="PublicAPI.Shipped.txt"
-        Condition=" Exists('$(MSBuildProjectDirectory)\$(_TFMDirectory)\PublicAPI.Shipped.txt') " />
-    <AdditionalFiles Include="PublicAPI.Unshipped.txt"
-        Condition=" Exists('$(MSBuildProjectDirectory)\$(_TFMDirectory)\PublicAPI.Unshipped.txt') " />
+    <!-- Turn off platform compatibility analyzer warnings in test, test assets, and samples. -->
+    <NoWarn Condition=" '$(IsTestProject)' == 'true' OR
+        '$(IsTestAssetProject)' == 'true' OR
+        '$(ISBenchmarkProject)' == 'true' OR
+        '$(IsSampleProject)' == 'true' OR
+        '$(IsMicrobenchmarksProject)' == 'true'">$(NoWarn);CA1416</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup Condition=" '$(DotNetBuildFromSource)' != 'true' AND $(AddPublicApiAnalyzers) ">
+    <Reference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" ExcludeAssets="Compile" PrivateAssets="All" />
   </ItemGroup>
+  <Target Name="_CheckIgnoredPublicApiFiles"
+      BeforeTargets="Build;Restore"
+      Condition=" Exists('$(MSBuildProjectDirectory)\PublicAPI.Shipped.txt') AND ! $(AddPublicApiAnalyzers) ">
+    <Warning Text="Public API baseline files ignored." />
+  </Target>
+  <Target Name="_RemovePublicApiAnalyzer" BeforeTargets="RazorCoreCompile">
+    <ItemGroup>
+      <_PublicAPIAnalyzers Include="@(Analyzer->WithMetadataValue('NuGetPackageId','Microsoft.CodeAnalysis.PublicApiAnalyzers'))" />
+      <Analyzer Remove="@(_PublicAPIAnalyzers)" />
+    </ItemGroup>
+  </Target>
+  <Target Name="_RestorePublicApiAnalyzer" AfterTargets="RazorCoreCompile">
+    <ItemGroup>
+      <Analyzer Include="@(_PublicAPIAnalyzers)" />
+    </ItemGroup>
+  </Target>
 
   <Target Name="GetCustomAssemblyAttributes"
           BeforeTargets="GetAssemblyAttributes"
@@ -48,6 +62,11 @@
         <_Parameter1>Serviceable</_Parameter1>
         <_Parameter2>True</_Parameter2>
       </AssemblyAttribute>
+
+      <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute" Condition="'$(Trimmable)' == 'true'">
+        <_Parameter1>IsTrimmable</_Parameter1>
+        <_Parameter2>True</_Parameter2>
+      </AssemblyAttribute>
     </ItemGroup>
   </Target>
 
@@ -64,8 +83,11 @@
         by compiling the annotations (as internal types).
         The code block that follows sets it up so projects in this repo that target ns2.0 or netfx can compile when Nullable is configured.
         Based on https://github.com/dotnet/runtime/blob/93b6c449d4f31ddd7d573d1d3769e681d5ebceb9/src/libraries/Directory.Build.targets#L215-L222
+
+        SuppressNullableAttributesImport to disable. Used when attributes are already present from another project because of InternalsVisibleTo.
      -->
-    <When Condition="'$(Nullable)' != '' AND ('$(TargetFrameworkIdentifier)' == '.NETStandard' OR '$(TargetFrameworkIdentifier)' == '.NETFramework')">
+    <When Condition="'$(Nullable)' != '' AND '$(SuppressNullableAttributesImport)' != 'true' AND
+        (('$(TargetFrameworkIdentifier)' == '.NETStandard' AND $([MSBuild]::VersionLessThanOrEquals('$(TargetFrameworkVersion)', '2.0'))) OR '$(TargetFrameworkIdentifier)' == '.NETFramework')">
       <PropertyGroup>
         <DefineConstants>$(DefineConstants),INTERNAL_NULLABLE_ATTRIBUTES</DefineConstants>
         <NoWarn>$(NoWarn);nullable</NoWarn>
@@ -75,6 +97,17 @@
       </ItemGroup>
     </When>
   </Choose>
+
+  <Target Name="ValidateBenchmarks" BeforeTargets="Test" Condition="'$(IsMicrobenchmarksProject)' == 'true' AND '$(SkipMicrobenchmarksValidation)' != 'true'">
+    <Message Text="%0ARunning benchmark validation for:%0A$(MSBuildProjectName)%0A"
+    Importance="High" />
+
+    <MSBuild Projects="$(MSBuildProjectFullPath)" Targets="GetTargetPath">
+      <Output TaskParameter="TargetOutputs" PropertyName="ExecPath" />
+    </MSBuild>
+
+    <Exec Command="dotnet $(ExecPath) -f * --validate-fast" IgnoreStandardErrorWarningFormat="true" StandardOutputImportance="low" />
+  </Target>
 
   <Import Project="Packaging.targets" />
   <Import Project="ResolveReferences.targets" />

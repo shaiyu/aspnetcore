@@ -7,6 +7,8 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 
+#nullable enable
+
 namespace System.Buffers
 {
     internal static class BufferExtensions
@@ -14,7 +16,7 @@ namespace System.Buffers
         private const int _maxULongByteLength = 20;
 
         [ThreadStatic]
-        private static byte[] _numericBytesScratch;
+        private static byte[]? _numericBytesScratch;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static ReadOnlySpan<byte> ToSpan(in this ReadOnlySequence<byte> buffer)
@@ -24,6 +26,27 @@ namespace System.Buffers
                 return buffer.FirstSpan;
             }
             return buffer.ToArray();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void CopyTo(in this ReadOnlySequence<byte> buffer, PipeWriter pipeWriter)
+        {
+            if (buffer.IsSingleSegment)
+            {
+                pipeWriter.Write(buffer.FirstSpan);
+            }
+            else
+            {
+                CopyToMultiSegment(buffer, pipeWriter);
+            }
+        }
+
+        private static void CopyToMultiSegment(in ReadOnlySequence<byte> buffer, PipeWriter pipeWriter)
+        {
+            foreach (var item in buffer)
+            {
+                pipeWriter.Write(item.Span);
+            }
         }
 
         public static ArraySegment<byte> GetArray(this Memory<byte> buffer)

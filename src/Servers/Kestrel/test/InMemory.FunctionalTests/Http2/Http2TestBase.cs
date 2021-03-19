@@ -6,7 +6,9 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.IO.Pipelines;
 using System.Linq;
@@ -149,7 +151,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
         protected readonly RequestDelegate _waitForAbortApplication;
         protected readonly RequestDelegate _waitForAbortFlushingApplication;
         protected readonly RequestDelegate _readRateApplication;
-        protected readonly RequestDelegate _echoMethod;
+        protected readonly RequestDelegate _echoMethodNoBody;
         protected readonly RequestDelegate _echoHost;
         protected readonly RequestDelegate _echoPath;
         protected readonly RequestDelegate _appAbort;
@@ -184,7 +186,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
                 // Emulate transport abort so the _connectionTask completes.
                 Task.Run(() =>
                 {
-                    TestApplicationErrorLogger.LogInformation(0, ex, "ConnectionContext.Abort() was called. Completing _pair.Application.Output.");
+                    Logger.LogInformation(0, ex, "ConnectionContext.Abort() was called. Completing _pair.Application.Output.");
                     _pair.Application.Output.Complete(ex);
                 });
             });
@@ -327,7 +329,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
 
             _readRateApplication = async context =>
             {
-                var expectedBytes = int.Parse(context.Request.Path.Value.Substring(1));
+                var expectedBytes = int.Parse(context.Request.Path.Value.Substring(1), CultureInfo.InvariantCulture);
 
                 var buffer = new byte[Http2PeerSettings.MinAllowedMaxFrameSize];
                 var received = 0;
@@ -345,8 +347,9 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
                 await stalledReadTask;
             };
 
-            _echoMethod = context =>
+            _echoMethodNoBody = context =>
             {
+                Assert.False(context.Request.CanHaveBody());
                 context.Response.Headers["Method"] = context.Request.Method;
 
                 return Task.CompletedTask;
@@ -410,6 +413,21 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
             _decodedHeaders[nameStr] = value.GetRequestHeaderString(nameStr, _serviceContext.ServerOptions.RequestHeaderEncodingSelector);
         }
 
+        public void OnStaticIndexedHeader(int index)
+        {
+            Debug.Assert(index <= H2StaticTable.Count);
+
+            ref readonly var entry = ref H2StaticTable.Get(index - 1);
+            ((IHttpHeadersHandler)this).OnHeader(entry.Name, entry.Value);
+        }
+
+        public void OnStaticIndexedHeader(int index, ReadOnlySpan<byte> value)
+        {
+            Debug.Assert(index <= H2StaticTable.Count);
+
+            ((IHttpHeadersHandler)this).OnHeader(H2StaticTable.Get(index - 1).Name, value);
+        }
+
         void IHttpHeadersHandler.OnHeadersComplete(bool endStream) { }
 
         protected void CreateConnection()
@@ -424,15 +442,13 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
 
             _pair = DuplexPipe.CreateConnectionPair(inputPipeOptions, outputPipeOptions);
 
-            var httpConnectionContext = new HttpConnectionContext
-            {
-                ConnectionContext = _mockConnectionContext.Object,
-                ConnectionFeatures = new FeatureCollection(),
-                ServiceContext = _serviceContext,
-                MemoryPool = _memoryPool,
-                Transport = _pair.Transport,
-                TimeoutControl = _mockTimeoutControl.Object
-            };
+            var httpConnectionContext = TestContextFactory.CreateHttpConnectionContext(
+                serviceContext: _serviceContext,
+                connectionContext: _mockConnectionContext.Object,
+                transport: _pair.Transport,
+                memoryPool: _memoryPool,
+                connectionFeatures: new FeatureCollection(),
+                timeoutControl: _mockTimeoutControl.Object);
 
             _connection = new Http2Connection(httpConnectionContext);
 
@@ -507,14 +523,19 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
             ((IRequestProcessor)_connection)?.Tick(now);
         }
 
-        protected Task StartStreamAsync(int streamId, IEnumerable<KeyValuePair<string, string>> headers, bool endStream)
+        protected Task StartStreamAsync(int streamId, IEnumerable<KeyValuePair<string, string>> headers, bool endStream, bool flushFrame = true)
         {
             var writableBuffer = _pair.Application.Output;
             var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             _runningStreams[streamId] = tcs;
 
             writableBuffer.WriteStartStream(streamId, _hpackEncoder, GetHeadersEnumerator(headers), _headerEncodingBuffer, endStream);
-            return FlushAsync(writableBuffer);
+
+            if (flushFrame)
+            {
+                return FlushAsync(writableBuffer);
+            }
+            return Task.CompletedTask;
         }
 
         protected Task StartStreamAsync(int streamId, Span<byte> headerData, bool endStream)
@@ -905,11 +926,15 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
             await SendAsync(payload);
         }
 
-        protected Task SendDataAsync(int streamId, Memory<byte> data, bool endStream)
+        protected Task SendDataAsync(int streamId, Memory<byte> data, bool endStream, bool flushFrame = true)
         {
             var outputWriter = _pair.Application.Output;
             outputWriter.WriteData(streamId, data, endStream);
-            return FlushAsync(outputWriter);
+            if (flushFrame)
+            {
+                return FlushAsync(outputWriter);
+            }
+            return Task.CompletedTask;
         }
 
         protected async Task SendDataWithPaddingAsync(int streamId, Memory<byte> data, byte padLength, bool endStream)
@@ -1187,13 +1212,14 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
 
             if (expectedErrorMessage?.Length > 0)
             {
-                var message = Assert.Single(TestApplicationErrorLogger.Messages, m => m.Exception is TException);
+                var message = Assert.Single(LogMessages, m => m.Exception is TException);
 
                 Assert.Contains(expectedErrorMessage, expected => message.Exception.Message.Contains(expected));
             }
 
+            Logger.LogInformation("Waiting for Connection task");
             await _connectionTask.DefaultTimeout();
-            TestApplicationErrorLogger.LogInformation("Stopping Connection From ConnectionErrorAsync");
+            Logger.LogInformation("Stopping Connection From ConnectionErrorAsync");
         }
 
         internal async Task WaitForStreamErrorAsync(int expectedStreamId, Http2ErrorCode expectedErrorCode, string expectedErrorMessage)
@@ -1208,7 +1234,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
 
             if (expectedErrorMessage != null)
             {
-                Assert.Contains(TestApplicationErrorLogger.Messages, m => m.Exception?.Message.Contains(expectedErrorMessage) ?? false);
+                Assert.Contains(LogMessages, m => m.Exception?.Message.Contains(expectedErrorMessage) ?? false);
             }
         }
 
@@ -1269,16 +1295,6 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
 
             // null means that we have no back pressure
             return bufferSize ?? 0;
-        }
-
-        public void OnStaticIndexedHeader(int index)
-        {
-            throw new NotImplementedException();
-        }
-
-        public void OnStaticIndexedHeader(int index, ReadOnlySpan<byte> value)
-        {
-            throw new NotImplementedException();
         }
 
         internal class Http2FrameWithPayload : Http2Frame

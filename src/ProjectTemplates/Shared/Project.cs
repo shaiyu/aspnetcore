@@ -100,6 +100,7 @@ namespace Templates.Test.Helpers
             await DotNetNewLock.WaitAsync();
             try
             {
+                Output.WriteLine("Acquired DotNetNewLock");
                 using var execution = ProcessEx.Run(Output, AppContext.BaseDirectory, DotNetMuxer.MuxerPathOrDefault(), argString, environmentVariables);
                 await execution.Exited;
                 return new ProcessResult(execution);
@@ -107,17 +108,20 @@ namespace Templates.Test.Helpers
             finally
             {
                 DotNetNewLock.Release();
+                Output.WriteLine("Released DotNetNewLock");
             }
         }
 
-        internal async Task<ProcessResult> RunDotNetPublishAsync(IDictionary<string, string> packageOptions = null, string additionalArgs = null)
+        internal async Task<ProcessResult> RunDotNetPublishAsync(IDictionary<string, string> packageOptions = null, string additionalArgs = null, bool noRestore = true)
         {
             Output.WriteLine("Publishing ASP.NET Core application...");
 
             // Avoid restoring as part of build or publish. These projects should have already restored as part of running dotnet new. Explicitly disabling restore
             // should avoid any global contention and we can execute a build or publish in a lock-free way
 
-            using var result = ProcessEx.Run(Output, TemplateOutputDir, DotNetMuxer.MuxerPathOrDefault(), $"publish --no-restore -c Release /bl {additionalArgs}", packageOptions);
+            var restoreArgs = noRestore ? "--no-restore" : null;
+
+            using var result = ProcessEx.Run(Output, TemplateOutputDir, DotNetMuxer.MuxerPathOrDefault(), $"publish {restoreArgs} -c Release /bl {additionalArgs}", packageOptions);
             await result.Exited;
             CaptureBinLogOnFailure(result);
             return new ProcessResult(result);
@@ -177,7 +181,7 @@ namespace Templates.Test.Helpers
             return new AspNetProcess(Output, TemplateOutputDir, projectDll, environment, published: false, hasListeningUri: hasListeningUri, logger: logger);
         }
 
-        internal AspNetProcess StartPublishedProjectAsync(bool hasListeningUri = true)
+        internal AspNetProcess StartPublishedProjectAsync(bool hasListeningUri = true, bool usePublishedAppHost = false)
         {
             var environment = new Dictionary<string, string>
             {
@@ -188,8 +192,8 @@ namespace Templates.Test.Helpers
                 ["ASPNETCORE_Logging__Console__FormatterOptions__IncludeScopes"] = "true",
             };
 
-            var projectDll = $"{ProjectName}.dll";
-            return new AspNetProcess(Output, TemplatePublishDir, projectDll, environment, published: true, hasListeningUri: hasListeningUri);
+            var projectDll = Path.Combine(TemplatePublishDir, $"{ProjectName}.dll");
+            return new AspNetProcess(Output, TemplatePublishDir, projectDll, environment, published: true, hasListeningUri: hasListeningUri, usePublishedAppHost: usePublishedAppHost);
         }
 
         internal async Task<ProcessResult> RunDotNetEfCreateMigrationAsync(string migrationName)
@@ -201,6 +205,7 @@ namespace Templates.Test.Helpers
             await DotNetNewLock.WaitAsync();
             try
             {
+                Output.WriteLine("Acquired DotNetNewLock");
                 var command = DotNetMuxer.MuxerPathOrDefault();
                 if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DotNetEfFullPath")))
                 {
@@ -218,6 +223,7 @@ namespace Templates.Test.Helpers
             finally
             {
                 DotNetNewLock.Release();
+                Output.WriteLine("Released DotNetNewLock");
             }
         }
 
@@ -225,24 +231,32 @@ namespace Templates.Test.Helpers
         {
             var assembly = typeof(ProjectFactoryFixture).Assembly;
 
-            var dotNetEfFullPath = assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
-                .First(attribute => attribute.Key == "DotNetEfFullPath")
-                .Value;
-
-            var args = $"\"{dotNetEfFullPath}\" --verbose --no-build database update";
+            var args = "--verbose --no-build database update";
 
             // Only run one instance of 'dotnet new' at once, as a workaround for
             // https://github.com/aspnet/templating/issues/63
             await DotNetNewLock.WaitAsync();
             try
             {
-                using var result = ProcessEx.Run(Output, TemplateOutputDir, DotNetMuxer.MuxerPathOrDefault(), args);
+                Output.WriteLine("Acquired DotNetNewLock");
+                var command = DotNetMuxer.MuxerPathOrDefault();
+                if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DotNetEfFullPath")))
+                {
+                    args = $"\"{DotNetEfFullPath}\" " + args;
+                }
+                else
+                {
+                    command = "dotnet-ef";
+                }
+                
+                using var result = ProcessEx.Run(Output, TemplateOutputDir, command, args);
                 await result.Exited;
                 return new ProcessResult(result);
             }
             finally
             {
                 DotNetNewLock.Release();
+                Output.WriteLine("Released DotNetNewLock");
             }
         }
 
@@ -250,7 +264,7 @@ namespace Templates.Test.Helpers
         public void AssertEmptyMigration(string migration)
         {
             var fullPath = Path.Combine(TemplateOutputDir, "Data/Migrations");
-            var file = Directory.EnumerateFiles(fullPath).Where(f => f.EndsWith($"{migration}.cs")).FirstOrDefault();
+            var file = Directory.EnumerateFiles(fullPath).Where(f => f.EndsWith($"{migration}.cs", StringComparison.Ordinal)).FirstOrDefault();
 
             Assert.NotNull(file);
             var contents = File.ReadAllText(file);
@@ -300,6 +314,7 @@ namespace Templates.Test.Helpers
             await DotNetNewLock.WaitAsync();
             try
             {
+                Output.WriteLine("Acquired DotNetNewLock");
                 var result = ProcessEx.Run(
                     Output,
                     AppContext.BaseDirectory,
@@ -313,6 +328,7 @@ namespace Templates.Test.Helpers
             finally
             {
                 DotNetNewLock.Release();
+                Output.WriteLine("Released DotNetNewLock");
             }
         }
 

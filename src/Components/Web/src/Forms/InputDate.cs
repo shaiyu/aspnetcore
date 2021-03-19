@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using Microsoft.AspNetCore.Components.Rendering;
@@ -21,6 +22,14 @@ namespace Microsoft.AspNetCore.Components.Forms
         /// </summary>
         [Parameter] public string ParsingErrorMessage { get; set; } = "The {0} field must be a date.";
 
+        /// <summary>
+        /// Gets or sets the associated <see cref="ElementReference"/>.
+        /// <para>
+        /// May be <see langword="null"/> if accessed before the component is rendered.
+        /// </para>
+        /// </summary>
+        [DisallowNull] public ElementReference? Element { get; protected set; }
+
         /// <inheritdoc />
         protected override void BuildRenderTree(RenderTreeBuilder builder)
         {
@@ -30,11 +39,12 @@ namespace Microsoft.AspNetCore.Components.Forms
             builder.AddAttribute(3, "class", CssClass);
             builder.AddAttribute(4, "value", BindConverter.FormatValue(CurrentValueAsString));
             builder.AddAttribute(5, "onchange", EventCallback.Factory.CreateBinder<string?>(this, __value => CurrentValueAsString = __value, CurrentValueAsString));
+            builder.AddElementReferenceCapture(6, __inputReference => Element = __inputReference);
             builder.CloseElement();
         }
 
         /// <inheritdoc />
-        protected override string FormatValueAsString([AllowNull] TValue value)
+        protected override string FormatValueAsString(TValue? value)
         {
             switch (value)
             {
@@ -48,7 +58,7 @@ namespace Microsoft.AspNetCore.Components.Forms
         }
 
         /// <inheritdoc />
-        protected override bool TryParseValueFromString(string? value, [MaybeNull] out TValue result, [NotNullWhen(false)] out string? validationErrorMessage)
+        protected override bool TryParseValueFromString(string? value, [MaybeNullWhen(false)] out TValue result, [NotNullWhen(false)] out string? validationErrorMessage)
         {
             // Unwrap nullable types. We don't have to deal with receiving empty values for nullable
             // types here, because the underlying InputBase already covers that.
@@ -70,17 +80,18 @@ namespace Microsoft.AspNetCore.Components.Forms
 
             if (success)
             {
+                Debug.Assert(result != null);
                 validationErrorMessage = null;
                 return true;
             }
             else
             {
-                validationErrorMessage = string.Format(ParsingErrorMessage, DisplayName ?? FieldIdentifier.FieldName);
+                validationErrorMessage = string.Format(CultureInfo.InvariantCulture, ParsingErrorMessage, DisplayName ?? FieldIdentifier.FieldName);
                 return false;
             }
         }
 
-        static bool TryParseDateTime(string? value, [MaybeNullWhen(false)] out TValue result)
+        private static bool TryParseDateTime(string? value, [MaybeNullWhen(false)] out TValue result)
         {
             var success = BindConverter.TryConvertToDateTime(value, CultureInfo.InvariantCulture, DateFormat, out var parsedValue);
             if (success)
@@ -95,7 +106,7 @@ namespace Microsoft.AspNetCore.Components.Forms
             }
         }
 
-        static bool TryParseDateTimeOffset(string? value, [MaybeNullWhen(false)] out TValue result)
+        private static bool TryParseDateTimeOffset(string? value, [MaybeNullWhen(false)] out TValue result)
         {
             var success = BindConverter.TryConvertToDateTimeOffset(value, CultureInfo.InvariantCulture, DateFormat, out var parsedValue);
             if (success)

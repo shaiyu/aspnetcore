@@ -44,10 +44,10 @@ namespace Microsoft.AspNetCore.Components.E2ETest.ServerExecutionTests
         protected override void InitializeAsyncCore()
         {
             Navigate(ServerPathBase, noReload: false);
-            Browser.MountTestComponent<CounterComponent>();
-            Browser.Equal("Current count: 0", () => Browser.FindElement(By.TagName("p")).Text);
+            Browser.MountTestComponent<GracefulTermination>();
+            Browser.Equal("Graceful Termination", () => Browser.Exists(By.TagName("h1")).Text);
 
-            GracefulDisconnectCompletionSource = new TaskCompletionSource<object>(TaskContinuationOptions.RunContinuationsAsynchronously);
+            GracefulDisconnectCompletionSource = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
             Sink = _serverFixture.Host.Services.GetRequiredService<TestSink>();
             Messages = new List<(Extensions.Logging.LogLevel level, string eventIdName)>();
             Sink.MessageLogged += Log;
@@ -65,7 +65,7 @@ namespace Microsoft.AspNetCore.Components.E2ETest.ServerExecutionTests
             Assert.Contains((Extensions.Logging.LogLevel.Debug, "CircuitDisconnectedPermanently"), Messages);
         }
 
-        [Fact]
+        [Fact(Skip = "https://github.com/dotnet/aspnetcore/issues/23015")]
         public async Task ClosingTheBrowserWindow_GracefullyDisconnects_TheCurrentCircuit()
         {
             // Arrange & Act
@@ -83,11 +83,51 @@ namespace Microsoft.AspNetCore.Components.E2ETest.ServerExecutionTests
         {
             // Arrange & Act
             Browser.Navigate().GoToUrl("about:blank");
+            var task = await Task.WhenAny(Task.Delay(10000), GracefulDisconnectCompletionSource.Task);
+
+            // Assert
+            Assert.Equal(GracefulDisconnectCompletionSource.Task, task);
+            Assert.Contains((Extensions.Logging.LogLevel.Debug, "CircuitTerminatedGracefully"), Messages);
+            Assert.Contains((Extensions.Logging.LogLevel.Debug, "CircuitDisconnectedPermanently"), Messages);
+        }
+
+        [Fact]
+        public async Task NavigatingToProtocolLink_DoesNotGracefullyDisconnect_TheCurrentCircuit()
+        {
+            // Arrange & Act
+            var element = Browser.Exists(By.Id("mailto-link"));
+            element.Click();
             await Task.WhenAny(Task.Delay(10000), GracefulDisconnectCompletionSource.Task);
 
             // Assert
-            Assert.Contains((Extensions.Logging.LogLevel.Debug, "CircuitTerminatedGracefully"), Messages);
-            Assert.Contains((Extensions.Logging.LogLevel.Debug, "CircuitDisconnectedPermanently"), Messages);
+            Assert.DoesNotContain((Extensions.Logging.LogLevel.Debug, "CircuitTerminatedGracefully"), Messages);
+            Assert.DoesNotContain((Extensions.Logging.LogLevel.Debug, "CircuitDisconnectedPermanently"), Messages);
+        }
+
+        [Fact]
+        public async Task DownloadAction_DoesNotGracefullyDisconnect_TheCurrentCircuit()
+        {
+            // Arrange & Act
+            var element = Browser.Exists(By.Id("download-link"));
+            element.Click();
+            await Task.WhenAny(Task.Delay(10000), GracefulDisconnectCompletionSource.Task);
+
+            // Assert
+            Assert.DoesNotContain((Extensions.Logging.LogLevel.Debug, "CircuitTerminatedGracefully"), Messages);
+            Assert.DoesNotContain((Extensions.Logging.LogLevel.Debug, "CircuitDisconnectedPermanently"), Messages);
+        }
+
+        [Fact]
+        public async Task DownloadHref_DoesNotGracefullyDisconnect_TheCurrentCircuit()
+        {
+            // Arrange & Act
+            var element = Browser.Exists(By.Id("download-href"));
+            element.Click();
+            await Task.WhenAny(Task.Delay(10000), GracefulDisconnectCompletionSource.Task);
+
+            // Assert
+            Assert.DoesNotContain((Extensions.Logging.LogLevel.Debug, "CircuitTerminatedGracefully"), Messages);
+            Assert.DoesNotContain((Extensions.Logging.LogLevel.Debug, "CircuitDisconnectedPermanently"), Messages);
         }
 
         private void Log(WriteContext wc)

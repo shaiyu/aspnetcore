@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
@@ -31,7 +31,7 @@ namespace Microsoft.Extensions.FileProviders.Embedded.Manifest
 
             if (segment.Equals("..", StringComparison.Ordinal))
             {
-                return Parent;
+                return Parent ?? UnknownPath;
             }
 
             foreach (var child in Children)
@@ -98,7 +98,7 @@ namespace Microsoft.Extensions.FileProviders.Embedded.Manifest
 
         private ManifestEntry[] CopyChildren()
         {
-            var list = new List<ManifestEntry>();
+            var list = new List<ManifestEntry>(Children.Count);
             for (int i = 0; i < Children.Count; i++)
             {
                 var child = Children[i];

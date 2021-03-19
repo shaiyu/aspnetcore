@@ -7,7 +7,6 @@ Microsoft.AspNetCore.Routing.Route
 Microsoft.AspNetCore.Routing.RouteCollection</Description>
     <TargetFramework>$(DefaultNetCoreTargetFramework)</TargetFramework>
     <IsAspNetCoreApp>true</IsAspNetCoreApp>
-    <NoWarn>$(NoWarn);CS1591</NoWarn>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageTags>aspnetcore;routing</PackageTags>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -21,11 +20,11 @@ Microsoft.AspNetCore.Routing.RouteCollection</Description>
     -->
     <ILEmitSaveAssemblies Condition="'$(ILEmitSaveAssemblies)'==''">false</ILEmitSaveAssemblies>
     <DefineConstants Condition="'$(ILEmitSaveAssemblies)'=='true'">IL_EMIT_SAVE_ASSEMBLIES;$(DefineConstants)</DefineConstants>
-    <LangVersion>preview</LangVersion>
   </PropertyGroup>
 
   <ItemGroup>
     <Compile Include="$(SharedSourceRoot)PropertyHelper\*.cs" />
+    <Compile Include="$(SharedSourceRoot)ObjectMethodExecutor\**\*.cs" />
   </ItemGroup>
 
   <ItemGroup>

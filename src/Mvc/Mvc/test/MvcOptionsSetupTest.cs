@@ -58,6 +58,7 @@ namespace Microsoft.AspNetCore.Mvc
                 binder => Assert.IsType<HeaderModelBinderProvider>(binder),
                 binder => Assert.IsType<FloatingPointTypeModelBinderProvider>(binder),
                 binder => Assert.IsType<EnumTypeModelBinderProvider>(binder),
+                binder => Assert.IsType<DateTimeModelBinderProvider>(binder),
                 binder => Assert.IsType<SimpleTypeModelBinderProvider>(binder),
                 binder => Assert.IsType<CancellationTokenModelBinderProvider>(binder),
                 binder => Assert.IsType<ByteArrayModelBinderProvider>(binder),
@@ -285,7 +286,7 @@ namespace Microsoft.AspNetCore.Mvc
         {
             var hostingEnvironment = new Mock<IWebHostEnvironment>();
             hostingEnvironment.SetupGet(e => e.ApplicationName)
-                .Returns(typeof(MvcOptionsSetupTest).GetTypeInfo().Assembly.GetName().Name);
+                .Returns(typeof(MvcOptionsSetupTest).Assembly.GetName().Name);
 
             hostingEnvironment.SetupGet(e => e.ContentRootFileProvider)
                 .Returns(Mock.Of<IFileProvider>());

@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -225,6 +226,22 @@ namespace Microsoft.AspNetCore.SignalR.Tests
         }
 
         public async Task<List<object>> UploadArray(ChannelReader<object> source)
+        {
+            var results = new List<object>();
+
+            while (await source.WaitToReadAsync())
+            {
+                while (source.TryRead(out var item))
+                {
+                    results.Add(item);
+                }
+            }
+
+            return results;
+        }
+
+        [Authorize("test")]
+        public async Task<List<object>> UploadArrayAuth(ChannelReader<object> source)
         {
             var results = new List<object>();
 
@@ -634,7 +651,7 @@ namespace Microsoft.AspNetCore.SignalR.Tests
             {
                 for (int i = 0; i < count; i++)
                 {
-                    await channel.Writer.WriteAsync(i.ToString());
+                    await channel.Writer.WriteAsync(i.ToString(CultureInfo.InvariantCulture));
                 }
                 channel.Writer.Complete();
             });
@@ -659,7 +676,7 @@ namespace Microsoft.AspNetCore.SignalR.Tests
             for (int i = 0; i < count; i++)
             {
                 await Task.Yield();
-                yield return i.ToString();
+                yield return i.ToString(CultureInfo.InvariantCulture);
             }
         }
 
@@ -684,11 +701,21 @@ namespace Microsoft.AspNetCore.SignalR.Tests
             return Channel.CreateUnbounded<string>().Reader;
         }
 
-        public ChannelReader<int> ThrowStream()
+        public ChannelReader<int> ExceptionStream()
         {
             var channel = Channel.CreateUnbounded<int>();
             channel.Writer.TryComplete(new Exception("Exception from channel"));
             return channel.Reader;
+        }
+
+        public ChannelReader<int> ThrowStream()
+        {
+            throw new Exception("Throw from hub method");
+        }
+
+        public ChannelReader<int> NullStream()
+        {
+            return null;
         }
 
         public int NonStream()
@@ -1008,6 +1035,13 @@ namespace Microsoft.AspNetCore.SignalR.Tests
         public int SimpleMethod()
         {
             return 21;
+        }
+
+        public async Task Upload(ChannelReader<string> stream)
+        {
+            _tcsService.StartedMethod.SetResult(null);
+            _ = await stream.ReadAndCollectAllAsync();
+            _tcsService.EndMethod.SetResult(null);
         }
 
         private class CustomAsyncEnumerable : IAsyncEnumerable<int>

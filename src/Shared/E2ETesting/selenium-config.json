@@ -1,6 +1,8 @@
 {
   "drivers": {
-    "chrome": {}
+    "chrome": {
+      "version" : "89.0.4389.23"
+    }
   },
-  "ignoreExtraDrivers": true  
+  "ignoreExtraDrivers": true
 }

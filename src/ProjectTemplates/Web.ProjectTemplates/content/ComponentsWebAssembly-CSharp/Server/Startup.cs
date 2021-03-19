@@ -3,8 +3,8 @@ using Microsoft.AspNetCore.Authentication;
 #endif
 using Microsoft.AspNetCore.Builder;
 #if (OrganizationalAuth || IndividualB2CAuth)
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Identity.Web;
-using Microsoft.Identity.Web.TokenCacheProviders.InMemory;
 #endif
 #if (RequiresHttps)
 using Microsoft.AspNetCore.HttpsPolicy;
@@ -51,6 +51,8 @@ namespace ComponentsWebAssembly_CSharp.Server
                     Configuration.GetConnectionString("DefaultConnection")));
 #endif
 
+            services.AddDatabaseDeveloperPageExceptionFilter();
+
             services.AddDefaultIdentity<ApplicationUser>(options => options.SignIn.RequireConfirmedAccount = true)
                 .AddEntityFrameworkStores<ApplicationDbContext>();
 
@@ -61,31 +63,29 @@ namespace ComponentsWebAssembly_CSharp.Server
                 .AddIdentityServerJwt();
 #endif
 #if (OrganizationalAuth)
+            services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 #if (GenerateApiOrGraph)
-            // Adds Microsoft Identity platform (AAD v2.0) support to protect this Api
-            services.AddMicrosoftWebApiAuthentication(Configuration, "AzureAd")
-                .AddMicrosoftWebApiCallsWebApi(Configuration, "AzureAd")
-                .AddInMemoryTokenCaches();
-#else
-            // Adds Microsoft Identity platform (AAD v2.0) support to protect this Api
-            services.AddMicrosoftWebApiAuthentication(Configuration, "AzureAd");
-#endif
+                .AddMicrosoftIdentityWebApi(Configuration.GetSection("AzureAd"))
+                    .EnableTokenAcquisitionToCallDownstreamApi()
 #if (GenerateApi)
-            services.AddDownstreamWebApiService(Configuration);
+                        .AddDownstreamWebApi("DownstreamApi", Configuration.GetSection("DownstreamApi"))
 #endif
 #if (GenerateGraph)
-            services.AddMicrosoftGraph(Configuration.GetValue<string>("CalledApi:CalledApiScopes")?.Split(' '),
-                                       Configuration.GetValue<string>("CalledApi:CalledApiUrl"));
+                        .AddMicrosoftGraph(Configuration.GetSection("DownstreamApi"))
+#endif
+                        .AddInMemoryTokenCaches();
+#else
+                .AddMicrosoftIdentityWebApi(Configuration.GetSection("AzureAd"));
 #endif
 #elif (IndividualB2CAuth)
+            services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 #if (GenerateApi)
-            services.AddMicrosoftWebApiAuthentication(Configuration, "AzureAdB2C")
-                .AddMicrosoftWebApiCallsWebApi(Configuration, "AzureAdB2C")
-                .AddInMemoryTokenCaches();
-
-            services.AddDownstreamWebApiService(Configuration);
+                .AddMicrosoftIdentityWebApi(Configuration.GetSection("AzureAdB2C"))
+                    .EnableTokenAcquisitionToCallDownstreamApi()
+                        .AddDownstreamWebApi("DownstreamApi", Configuration.GetSection("DownstreamApi"))
+                        .AddInMemoryTokenCaches();
 #else
-            services.AddMicrosoftWebApiAuthentication(Configuration, "AzureAdB2C");
+                .AddMicrosoftIdentityWebApi(Configuration.GetSection("AzureAdB2C"));
 #endif
 #endif
 
@@ -100,7 +100,7 @@ namespace ComponentsWebAssembly_CSharp.Server
             {
                 app.UseDeveloperExceptionPage();
 #if (IndividualLocalAuth)
-                app.UseDatabaseErrorPage();
+                app.UseMigrationsEndPoint();
 #endif
                 app.UseWebAssemblyDebugging();
             }

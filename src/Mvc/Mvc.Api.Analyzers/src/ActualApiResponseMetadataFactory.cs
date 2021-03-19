@@ -202,16 +202,11 @@ namespace Microsoft.AspNetCore.Mvc.Api.Analyzers
             return (statusCode, typeSymbol);
         }
 
-        private static ITypeSymbol GetExpressionObjectType(SemanticModel semanticModel, ExpressionSyntax expression, CancellationToken cancellationToken)
+        private static ITypeSymbol? GetExpressionObjectType(SemanticModel semanticModel, ExpressionSyntax expression, CancellationToken cancellationToken)
         {
             var typeInfo = semanticModel.GetTypeInfo(expression, cancellationToken);
-
-            if (typeInfo.Type == null)
-            {
-                throw new ArgumentNullException(nameof(typeInfo.Type));
-            }
-
-            return typeInfo.Type!;
+            
+            return typeInfo.Type;
         }
 
         private static bool TryGetExpressionStatusCode(
@@ -281,14 +276,14 @@ namespace Microsoft.AspNetCore.Mvc.Api.Analyzers
 
             for (var i = 0; i < property.ExplicitInterfaceImplementations.Length; i++)
             {
-                if (property.ExplicitInterfaceImplementations[i] == statusCodeActionResultStatusProperty)
+                if (SymbolEqualityComparer.Default.Equals(property.ExplicitInterfaceImplementations[i], statusCodeActionResultStatusProperty))
                 {
                     return true;
                 }
             }
 
             var implementedProperty = property.ContainingType.FindImplementationForInterfaceMember(statusCodeActionResultStatusProperty);
-            return implementedProperty == property;
+            return SymbolEqualityComparer.Default.Equals(implementedProperty, property);
         }
 
         private static bool HasAttributeNamed(ISymbol symbol, string attributeName)

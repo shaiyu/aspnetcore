@@ -5,17 +5,31 @@
     <RootNamespace>Microsoft.AspNetCore</RootNamespace>
     <VerifyAncmBinary Condition="'$(TargetOsName)' == 'win' AND '$(TargetArchitecture)' != 'arm'">true</VerifyAncmBinary>
     <TestDependsOnAspNetRuntime>true</TestDependsOnAspNetRuntime>
-    <TestDependsOnAspNetRef>true</TestDependsOnAspNetRef>
     <SkipHelixArm>true</SkipHelixArm>
   </PropertyGroup>
 
   <ItemGroup>
-    <_ExpectedSharedFrameworkBinaries Include="@(AspNetCoreAppReference);@(AspNetCoreAppReferenceAndPackage);@(ExternalAspNetCoreAppReference);@(_TransitiveExternalAspNetCoreAppReference)" />
+    <!-- Ignore aspnetcorev2_inprocess because tests expect only managed assemblies in this item group. -->
+    <_SharedFrameworkBinariesFromRepo Include="@(AspNetCoreAppReference);@(AspNetCoreAppReferenceAndPackage)" />
+
+    <!--
+      Special-case System.Diagnostics.EventLog.Messages.dll because that assembly name does _not_ match a
+      package. Can't mention it in @(ExternalAspNetCoreAppReference) or underlying
+      @(_TransitiveExternalAspNetCoreAppReference) without thoroughly confusing eng/targets/ResolveReferences.targets.
+    -->
+    <_ExpectedSharedFrameworkBinaries Include="@(_SharedFrameworkBinariesFromRepo);
+        @(ExternalAspNetCoreAppReference);
+        @(_TransitiveExternalAspNetCoreAppReference);
+        System.Diagnostics.EventLog.Messages" />
     <_ExpectedSharedFrameworkBinaries Condition="'$(TargetOsName)' == 'win' AND '$(TargetArchitecture)' != 'arm'" Include="aspnetcorev2_inprocess" />
 
     <AssemblyAttribute Include="Microsoft.AspNetCore.TestData">
       <_Parameter1>SharedFxVersion</_Parameter1>
       <_Parameter2>$(SharedFxVersion)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="Microsoft.AspNetCore.TestData">
+      <_Parameter1>DefaultNetCoreTargetFramework</_Parameter1>
+      <_Parameter2>$(DefaultNetCoreTargetFramework)</_Parameter2>
     </AssemblyAttribute>
     <AssemblyAttribute Include="Microsoft.AspNetCore.TestData">
       <_Parameter1>TargetRuntimeIdentifier</_Parameter1>
@@ -24,6 +38,10 @@
     <AssemblyAttribute Include="Microsoft.AspNetCore.TestData">
       <_Parameter1>MicrosoftNETCoreAppRuntimeVersion</_Parameter1>
       <_Parameter2>$(MicrosoftNETCoreAppRuntimeVersion)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="Microsoft.AspNetCore.TestData">
+      <_Parameter1>SharedFrameworkBinariesFromRepo</_Parameter1>
+      <_Parameter2>@(_SharedFrameworkBinariesFromRepo)</_Parameter2>
     </AssemblyAttribute>
     <AssemblyAttribute Include="Microsoft.AspNetCore.TestData">
       <_Parameter1>SharedFxDependencies</_Parameter1>
@@ -49,14 +67,17 @@
 
   <ItemGroup>
     <Reference Include="Newtonsoft.Json" />
+    <Reference Include="NuGet.Versioning" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\App.Ref\src\Microsoft.AspNetCore.App.Ref.csproj">
+    <ProjectReference Include="..\App.Ref\src\Microsoft.AspNetCore.App.Ref.csproj"
+        Condition=" $(IsTargetingPackBuilding) ">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <SkipGetTargetFrameworkProperties>true</SkipGetTargetFrameworkProperties>
     </ProjectReference>
-    <ProjectReference Include="..\App.Runtime\src\Microsoft.AspNetCore.App.Runtime.csproj">
+    <ProjectReference Include="..\App.Runtime\src\Microsoft.AspNetCore.App.Runtime.csproj"
+        Condition=" !$(IsTargetingPackBuilding) ">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <SkipGetTargetFrameworkProperties>true</SkipGetTargetFrameworkProperties>
     </ProjectReference>
@@ -68,20 +89,6 @@
         Targets="_ResolveTargetingPackContent"
         SkipNonexistentProjects="false">
       <Output TaskParameter="TargetOutputs" ItemName="_TargetingPackDependencies" />
-    </MSBuild>
-
-    <!-- This target is defined in eng/targets/Packaging.targets and included in every C# and F# project. -->
-    <MSBuild Projects="$(RepoRoot)src\Framework\App.Runtime\src\Microsoft.AspNetCore.App.Runtime.csproj"
-        Targets="_GetPackageVersionInfo"
-        SkipNonexistentProjects="false">
-      <Output TaskParameter="TargetOutputs" ItemName="_RuntimePackageVersionInfo" />
-    </MSBuild>
-
-    <!-- Runtime and Ref packs may have separate versions. -->
-    <MSBuild Projects="$(RepoRoot)src\Framework\App.Ref\src\Microsoft.AspNetCore.App.Ref.csproj"
-        Targets="_GetPackageVersionInfo"
-        SkipNonexistentProjects="false">
-      <Output TaskParameter="TargetOutputs" ItemName="_TargetingPackVersionInfo" />
     </MSBuild>
 
     <ItemGroup>
@@ -119,12 +126,12 @@
 
       <AssemblyAttribute Include="Microsoft.AspNetCore.TestData">
         <_Parameter1>RuntimePackageVersion</_Parameter1>
-        <_Parameter2>@(_RuntimePackageVersionInfo->'%(PackageVersion)')</_Parameter2>
+        <_Parameter2>$(SharedFxVersion)</_Parameter2>
       </AssemblyAttribute>
 
       <AssemblyAttribute Include="Microsoft.AspNetCore.TestData">
         <_Parameter1>TargetingPackVersion</_Parameter1>
-        <_Parameter2>@(_TargetingPackVersionInfo->'%(PackageVersion)')</_Parameter2>
+        <_Parameter2>$(TargetingPackVersion)</_Parameter2>
       </AssemblyAttribute>
     </ItemGroup>
   </Target>

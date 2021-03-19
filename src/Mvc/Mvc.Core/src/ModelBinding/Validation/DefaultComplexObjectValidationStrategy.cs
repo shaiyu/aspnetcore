@@ -1,6 +1,8 @@
 // Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
+#nullable enable
+
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -58,7 +60,8 @@ namespace Microsoft.AspNetCore.Mvc.ModelBinding.Validation
                 }
                 else
                 {
-                    _parameters = _modelMetadata.BoundConstructor.BoundConstructorParameters;
+                    _modelMetadata.ThrowIfRecordTypeHasValidationOnProperties();
+                    _parameters = _modelMetadata.BoundConstructor.BoundConstructorParameters!;
                 }
 
                 _properties = _modelMetadata.BoundProperties;
@@ -130,9 +133,9 @@ namespace Microsoft.AspNetCore.Mvc.ModelBinding.Validation
                 throw new NotImplementedException();
             }
 
-            private static object GetModel(object container, ModelMetadata property)
+            private static object? GetModel(object container, ModelMetadata property)
             {
-                return property.PropertyGetter(container);
+                return property.PropertyGetter!(container);
             }
         }
     }

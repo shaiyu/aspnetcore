@@ -61,7 +61,7 @@ namespace Microsoft.AspNetCore.Http.Connections.Internal
             // the Connection ID metadata. If this is the negotiate request then the Connection ID for the scope will
             // be set a little later.
 
-            HttpConnectionContext connectionContext = null;
+            HttpConnectionContext? connectionContext = null;
             var connectionToken = GetConnectionToken(context);
             if (connectionToken != null)
             {
@@ -206,7 +206,7 @@ namespace Microsoft.AspNetCore.Http.Connections.Internal
                     return;
                 }
 
-                var resultTask = await Task.WhenAny(connection.ApplicationTask, connection.TransportTask);
+                var resultTask = await Task.WhenAny(connection.ApplicationTask!, connection.TransportTask!);
 
                 try
                 {
@@ -219,7 +219,7 @@ namespace Microsoft.AspNetCore.Http.Connections.Internal
                         // Wait for the transport to run
                         // Ignore exceptions, it has been logged if there is one and the application has finished
                         // So there is no one to give the exception to
-                        await connection.TransportTask.NoThrow();
+                        await connection.TransportTask!.NoThrow();
 
                         // If the status code is a 204 it means the connection is done
                         if (context.Response.StatusCode == StatusCodes.Status204NoContent)
@@ -265,10 +265,10 @@ namespace Microsoft.AspNetCore.Http.Connections.Internal
                                                   HttpContext context,
                                                   HttpConnectionContext connection)
         {
-            if (connection.TryActivatePersistentConnection(connectionDelegate, transport, _logger))
+            if (connection.TryActivatePersistentConnection(connectionDelegate, transport, context, _logger))
             {
                 // Wait for any of them to end
-                await Task.WhenAny(connection.ApplicationTask, connection.TransportTask);
+                await Task.WhenAny(connection.ApplicationTask!, connection.TransportTask!);
 
                 await _manager.DisposeAndRemoveAsync(connection, closeGracefully: true);
             }
@@ -277,7 +277,7 @@ namespace Microsoft.AspNetCore.Http.Connections.Internal
         private async Task ProcessNegotiate(HttpContext context, HttpConnectionDispatcherOptions options, ConnectionLogScope logScope)
         {
             context.Response.ContentType = "application/json";
-            string error = null;
+            string? error = null;
             int clientProtocolVersion = 0;
             if (context.Request.Query.TryGetValue("NegotiateVersion", out var queryStringVersion))
             {
@@ -306,7 +306,7 @@ namespace Microsoft.AspNetCore.Http.Connections.Internal
             }
 
             // Establish the connection
-            HttpConnectionContext connection = null;
+            HttpConnectionContext? connection = null;
             if (error == null)
             {
                 connection = CreateConnection(options, clientProtocolVersion);
@@ -336,8 +336,8 @@ namespace Microsoft.AspNetCore.Http.Connections.Internal
             }
         }
 
-        private void WriteNegotiatePayload(IBufferWriter<byte> writer, string connectionId, string connectionToken, HttpContext context, HttpConnectionDispatcherOptions options,
-            int clientProtocolVersion, string error)
+        private void WriteNegotiatePayload(IBufferWriter<byte> writer, string? connectionId, string? connectionToken, HttpContext context, HttpConnectionDispatcherOptions options,
+            int clientProtocolVersion, string? error)
         {
             var response = new NegotiationResponse();
 
@@ -561,7 +561,7 @@ namespace Microsoft.AspNetCore.Http.Connections.Internal
             }
 
             // Setup the connection state from the http context
-            connection.User = connection.HttpContext.User;
+            connection.User = connection.HttpContext?.User;
 
             // Set the Connection ID on the logging scope so that logs from now on will have the
             // Connection ID metadata set.
@@ -578,7 +578,7 @@ namespace Microsoft.AspNetCore.Http.Connections.Internal
             if (oldContext.User.Identity is WindowsIdentity windowsIdentity)
             {
                 var skipFirstIdentity = false;
-                if (oldContext.User is WindowsPrincipal)
+                if (OperatingSystem.IsWindows() && oldContext.User is WindowsPrincipal)
                 {
                     // We want to explicitly create a WindowsPrincipal instead of a ClaimsPrincipal
                     // so methods that WindowsPrincipal overrides like 'IsInRole', work as expected.
@@ -611,7 +611,7 @@ namespace Microsoft.AspNetCore.Http.Connections.Internal
             // The reason we're copying the base features instead of the HttpContext properties is
             // so that we can get all of the logic built into DefaultHttpContext to extract higher level
             // structure from the low level properties
-            var existingRequestFeature = context.Features.Get<IHttpRequestFeature>();
+            var existingRequestFeature = context.Features.Get<IHttpRequestFeature>()!;
 
             var requestFeature = new HttpRequestFeature();
             requestFeature.Protocol = existingRequestFeature.Protocol;
@@ -664,12 +664,12 @@ namespace Microsoft.AspNetCore.Http.Connections.Internal
             newHttpContext.RequestServices = connection.ServiceScope.ServiceProvider;
 
             // REVIEW: This extends the lifetime of anything that got put into HttpContext.Items
-            newHttpContext.Items = new Dictionary<object, object>(context.Items);
+            newHttpContext.Items = new Dictionary<object, object?>(context.Items);
 
             connection.HttpContext = newHttpContext;
         }
 
-        private async Task<HttpConnectionContext> GetConnectionAsync(HttpContext context)
+        private async Task<HttpConnectionContext?> GetConnectionAsync(HttpContext context)
         {
             var connectionToken = GetConnectionToken(context);
 
@@ -695,10 +695,10 @@ namespace Microsoft.AspNetCore.Http.Connections.Internal
         }
 
         // This is only used for WebSockets connections, which can connect directly without negotiating
-        private async Task<HttpConnectionContext> GetOrCreateConnectionAsync(HttpContext context, HttpConnectionDispatcherOptions options)
+        private async Task<HttpConnectionContext?> GetOrCreateConnectionAsync(HttpContext context, HttpConnectionDispatcherOptions options)
         {
             var connectionToken = GetConnectionToken(context);
-            HttpConnectionContext connection;
+            HttpConnectionContext? connection;
 
             // There's no connection id so this is a brand new connection
             if (StringValues.IsNullOrEmpty(connectionToken))
@@ -726,7 +726,7 @@ namespace Microsoft.AspNetCore.Http.Connections.Internal
         private class EmptyServiceProvider : IServiceProvider
         {
             public static EmptyServiceProvider Instance { get; } = new EmptyServiceProvider();
-            public object GetService(Type serviceType) => null;
+            public object? GetService(Type serviceType) => null;
         }
     }
 }

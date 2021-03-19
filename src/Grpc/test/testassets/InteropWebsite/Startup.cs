@@ -17,10 +17,12 @@
 #endregion
 
 using System;
+using System.Reflection;
 using Grpc.Testing;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Net.Http.Headers;
 
 namespace InteropTestsWebsite
 {
@@ -37,7 +39,15 @@ namespace InteropTestsWebsite
         public void Configure(IApplicationBuilder app, IHostApplicationLifetime applicationLifetime)
         {
             // Required to notify test infrastructure that it can begin tests
-            applicationLifetime.ApplicationStarted.Register(() => Console.WriteLine("Application started."));
+            applicationLifetime.ApplicationStarted.Register(() =>
+            {
+                Console.WriteLine("Application started.");
+
+                var runtimeVersion = typeof(object).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "Unknown";
+                Console.WriteLine($"NetCoreAppVersion: {runtimeVersion}");
+                var aspNetCoreVersion = typeof(HeaderNames).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "Unknown";
+                Console.WriteLine($"AspNetCoreAppVersion: {aspNetCoreVersion}");
+            });
 
             app.UseRouting();
             app.UseEndpoints(endpoints =>

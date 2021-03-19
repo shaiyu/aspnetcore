@@ -8,35 +8,64 @@
     <HelixPreCommand Include="call RunPowershell.cmd mssql\InstallSqlServerLocalDB.ps1 || exit /b 1" />
   </ItemGroup>
 
+  <PropertyGroup Condition="'$(TestDependsOnPlaywright)' == 'true'">
+    <SkipHelixQueues>Windows.7.Amd64.Open;Windows.81.Amd64.Open;Redhat.7.Amd64.Open;Redhat.7.Amd64;Debian.9.Amd64.Open;Debian.9.Amd64.Open;Ubuntu.2004.Amd64.Open;Ubuntu.2004.Amd64;Ubuntu.1604.Amd64.Open;Ubuntu.1604.Amd64;Alpine.312.Amd64.Open;(Alpine.312.Amd64.Open)Ubuntu.1604.Amd64.Open@mcr.microsoft.com/dotnet-buildtools/prereqs:alpine-3.12-helix-20200908125345-56c6673;(Fedora.33.Amd64.Open)Ubuntu.1604.Amd64.Open@mcr.microsoft.com/dotnet-buildtools/prereqs:fedora-33-helix-20210120000908-a9df267</SkipHelixQueues>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(TestDependsOnPlaywright)' == 'true' AND '$(IsWindowsHelixQueue)' == 'true'">
+    <HelixPreCommand Include="call RunPowershell.cmd installPlaywrightReqs.ps1 || exit /b 1" />
+  </ItemGroup>
+  
+  <ItemGroup Condition="'$(TestDependsOnIIS)' == 'true' AND '$(IsWindowsOnlyTest)' == 'true'">
+    <HelixContent Include="$(RepoRoot)src\Servers\IIS\tools\update_schema.ps1" />
+    <HelixContent Include="$(RepoRoot)src\Servers\IIS\tools\UpdateIISExpressCertificate.ps1" />
+    <HelixContent Include="$(RepoRoot)src\Servers\IIS\tools\TestCert.pfx" />
+    <HelixContent Include="$(RepoRoot)src\Servers\IIS\AspNetCoreModuleV2\AspNetCore\aspnetcore_schema_v2.xml" />
+
+    <HelixPreCommand Include="call RunPowershell.cmd update_schema.ps1 || exit /b 1" />
+    <HelixPreCommand Include="call RunPowershell.cmd UpdateIISExpressCertificate.ps1 || exit /b 1" />
+  </ItemGroup>
+
   <ItemGroup Condition="'$(TestDependsOnNode)' == 'true' AND '$(IsWindowsHelixQueue)' == 'false'">
     <HelixPreCommand Include="./installnode.sh $(NodeVersion) $(TargetArchitecture)" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TestDependsOnNode)' == 'true' AND '$(IsWindowsHelixQueue)' == 'true'">
-    <HelixPreCommand Include="call RunPowershell.cmd InstallNode.ps1 $(NodeVersion) %25HELIX_CORRELATION_PAYLOAD%25\node\bin || exit /b 1" />
+    <HelixPreCommand Include="call RunPowershell.cmd InstallNode.ps1 $(NodeVersion) || exit /b 1" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(IsHelixJob)' == 'true' AND '$(TestDependsOnAspNetRef)' == 'true' AND '$(IsTargetingPackBuilding)' == 'true'">
-    <HelixContent Include="$(RepoRoot)artifacts\packages\Release\Shipping\Microsoft.AspNetCore.App.Ref.$(AppRuntimeVersion).nupkg" />
+  <ItemGroup Condition=" '$(TestDependsOnAspNetRuntime)' == 'true' ">
+    <!-- Grab all shipping packages. -->
+    <HelixContent Include="$(RepoRoot)artifacts\packages\$(Configuration)\Shipping\*$(SharedFxVersion).nupkg" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(IsHelixJob)' == 'true' AND '$(TestDependsOnAspNetRuntime)' == 'true'">
-    <HelixContent Include="$(RepoRoot)artifacts\packages\Release\Shipping\*-ci.nupkg" />
+  <ItemGroup>
+    <!-- Java test projects do not use xUnit. -->
+    <HelixContent Include="$(OutputPath)Microsoft.VisualStudio.TestPlatform.Extension.Xunit.Xml.TestAdapter.dll"
+        Condition=" EXISTS('$(OutputPath)Microsoft.VisualStudio.TestPlatform.Extension.Xunit.Xml.TestLogger.dll') " />
+    <HelixContent Include="$(OutputPath)Microsoft.VisualStudio.TestPlatform.Extension.Xunit.Xml.TestLogger.dll"
+        Condition=" EXISTS('$(OutputPath)Microsoft.VisualStudio.TestPlatform.Extension.Xunit.Xml.TestLogger.dll') " />
   </ItemGroup>
 
-  <!-- Item group has to be defined here becasue Helix.props is evaluated before xunit.runner.console.props  -->
+  <!-- Item group has to be defined here because Helix.props is evaluated before xunit.runner.console.props  -->
   <ItemGroup Condition="$(BuildHelixPayload)">
     <Content Include="@(HelixContent)" />
     <Content Include="$(RepoRoot)eng\scripts\Download.ps1" />
+    <Content Include="$(RepoRoot)NuGet.config" />
+    <Content Include="$(RepoRoot)global.json" />
+    <ContentWithTargetPath Include="
+        $(RepoRoot)eng\common\pipeline-logging-functions.*;
+        $(RepoRoot)eng\common\tools.*">
+      <TargetPath>eng\common\%(Filename)%(Extension)</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </ContentWithTargetPath>
   </ItemGroup>
 
-<!--
-
-This target is meant to be used when invoking helix tests on one project at a time.
-
-Usage: dotnet msbuild /t:Helix src/MyTestProject.csproj
-
--->
+  <!--
+    This target is meant to be used when invoking helix tests on one project at a time.
+    Usage: dotnet msbuild /t:Helix src/MyTestProject.csproj
+  -->
   <Target Name="Helix">
     <MSBuild Projects="$(MSBuildThisFileDirectory)..\helix\helix.proj"
              Properties="ProjectToBuild=$(MSBuildProjectFullPath)" />
@@ -81,6 +110,7 @@ Usage: dotnet msbuild /t:Helix src/MyTestProject.csproj
     <PropertyGroup>
       <BuildHelixPayload Condition="'@(_HelixApplicableTargetQueue->Count())' == '0'">false</BuildHelixPayload>
       <BuildHelixPayload Condition="'$(TargetArchitecture)' == 'arm64' AND '$(SkipHelixArm)' == 'true'">false</BuildHelixPayload>
+      <BuildHelixPayload Condition="$(HelixTargetQueue.StartsWith('%28Alpine.')) AND '$(SkipHelixAlpine)' == 'true'">false</BuildHelixPayload>
       <BuildHelixPayload Condition="$(SkipHelixQueues.Contains('$(HelixTargetQueue)'))">false</BuildHelixPayload>
     </PropertyGroup>
   </Target>
@@ -91,13 +121,6 @@ Usage: dotnet msbuild /t:Helix src/MyTestProject.csproj
   </Target>
 
   <Target Name="_CreateHelixWorkItem" Condition="$(BuildHelixPayload)">
-
-    <ItemGroup>
-      <HelixContent Include="$(OutputPath)/Microsoft.VisualStudio.TestPlatform.Extension.Xunit.Xml.TestAdapter.dll" />
-      <HelixContent Include="$(OutputPath)/Microsoft.VisualStudio.TestPlatform.Extension.Xunit.Xml.TestLogger.dll" />
-      <HelixContent Condition="'$(TestDependsOnAspNetRuntime)' == 'true'" Include="$(RepoRoot)artifacts\packages\Release\Shipping\Microsoft.AspNetCore.App.Runtime.win-x64.$(AppRuntimeVersion).nupkg" />
-    </ItemGroup>
-
     <PropertyGroup>
       <!-- Extract the effective queue name from this format "(name)host@dockerimage". This is sometimes used in test code to skip tests.  -->
       <_HelixFriendlyNameTargetQueue>$(HelixTargetQueue)</_HelixFriendlyNameTargetQueue>
@@ -106,6 +129,42 @@ Usage: dotnet msbuild /t:Helix src/MyTestProject.csproj
 
     <!-- Important: If HelixTargetQueue is not removed here, then Publish will occur for every single queue type. And since Publish shouldn't depend on the queue we can just publish once -->
     <MSBuild Projects="$(MSBuildProjectFullPath)" Targets="_PublishHelixArchive" RemoveProperties="HelixTargetQueue;TestRunId" />
+
+    <!-- Isolate Helix tests from whatever happens to be in a parent directory. -->
+    <Copy SourceFiles="$(RepoRoot)eng\helix\content\Directory.Build.empty.in"
+        DestinationFiles="$(PublishDir)Directory.Build.props"
+        Condition="! EXISTS('$(PublishDir)Directory.Build.props') AND '$(TestDependsOnAspNetRuntime)' != 'true'"
+        OverwriteReadOnlyFiles="$(OverwriteReadOnlyFiles)"
+        Retries="$(CopyRetryCount)"
+        RetryDelayMilliseconds="$(CopyRetryDelayMilliseconds)"
+        SkipUnchangedFiles="$(SkipCopyUnchangedFiles)" />
+    <Copy SourceFiles="$(RepoRoot)eng\helix\content\Directory.Build.empty.in"
+        DestinationFiles="$(PublishDir)Directory.Build.targets"
+        Condition="! EXISTS('$(PublishDir)Directory.Build.targets') AND '$(TestDependsOnAspNetRuntime)' != 'true'"
+        OverwriteReadOnlyFiles="$(OverwriteReadOnlyFiles)"
+        Retries="$(CopyRetryCount)"
+        RetryDelayMilliseconds="$(CopyRetryDelayMilliseconds)"
+        SkipUnchangedFiles="$(SkipCopyUnchangedFiles)" />
+
+    <!--
+      Use the shared framework and ref/ assemblies copied to the Helix agents and expanded by RunTests. Unfortunately,
+      tests of Microsoft.NET.Sdk.Web templates will not reference the just-built Microsoft.NET.Sdk.Razor. Adding a
+      package reference for that would confuse tests of Microsoft.NET.Sdk templates.
+    -->
+    <Copy SourceFiles="$(ArtifactsBinDir)GenerateFiles\Directory.Build.props"
+        DestinationFiles="$(PublishDir)Directory.Build.props"
+        Condition="! EXISTS('$(PublishDir)Directory.Build.props') AND '$(TestDependsOnAspNetRuntime)' == 'true'"
+        OverwriteReadOnlyFiles="$(OverwriteReadOnlyFiles)"
+        Retries="$(CopyRetryCount)"
+        RetryDelayMilliseconds="$(CopyRetryDelayMilliseconds)"
+        SkipUnchangedFiles="$(SkipCopyUnchangedFiles)" />
+    <Copy SourceFiles="$(ArtifactsBinDir)GenerateFiles\Directory.Build.targets"
+        DestinationFiles="$(PublishDir)Directory.Build.targets"
+        Condition="! EXISTS('$(PublishDir)Directory.Build.targets') AND '$(TestDependsOnAspNetRuntime)' == 'true'"
+        OverwriteReadOnlyFiles="$(OverwriteReadOnlyFiles)"
+        Retries="$(CopyRetryCount)"
+        RetryDelayMilliseconds="$(CopyRetryDelayMilliseconds)"
+        SkipUnchangedFiles="$(SkipCopyUnchangedFiles)" />
 
     <ConvertToAbsolutePath Paths="$(PublishDir)">
       <Output TaskParameter="AbsolutePaths" PropertyName="PublishAbsoluteDir" />
@@ -117,8 +176,13 @@ Usage: dotnet msbuild /t:Helix src/MyTestProject.csproj
         <TestAssembly>$(TargetFileName)</TestAssembly>
         <PreCommands>@(HelixPreCommand)</PreCommands>
         <PostCommands>@(HelixPostCommand)</PostCommands>
-        <Command Condition="$(IsWindowsHelixQueue)">call runtests.cmd $(TargetFileName) $(NETCoreSdkVersion) $(MicrosoftNETCoreAppRuntimeVersion) $(_HelixFriendlyNameTargetQueue) $(TargetArchitecture) $(RunQuarantinedTests) $(DotnetEfPackageVersion) Microsoft.AspNetCore.App.Runtime.win-x64.$(AppRuntimeVersion).nupkg Microsoft.AspNetCore.App.Ref.$(AppRuntimeVersion).nupkg $(HelixTimeout)</Command>
-        <Command Condition="!$(IsWindowsHelixQueue)">./runtests.sh $(TargetFileName) $(NETCoreSdkVersion) $(MicrosoftNETCoreAppRuntimeVersion) $(_HelixFriendlyNameTargetQueue) $(TargetArchitecture) $(RunQuarantinedTests) $(DotnetEfPackageVersion) Microsoft.AspNetCore.App.Runtime.win-x64.$(AppRuntimeVersion).nupkg Microsoft.AspNetCore.App.Ref.$(AppRuntimeVersion).nupkg $(HelixTimeout)</Command>
+        <!--
+          When the targeting pack builds, it has exactly the same version as the shared framework. Passing
+          SharedFxVersion because that's needed even when the targeting pack isn't building.
+          Use the BrowserDebugHost transport package as a sentinel for the non-shipping version of the NETCoreApp shared framework.
+        -->
+        <Command Condition="$(IsWindowsHelixQueue)">call runtests.cmd $(TargetFileName) $(NETCoreSdkVersion) $(MicrosoftNETCoreBrowserDebugHostTransportVersion) $(SharedFxVersion) $(_HelixFriendlyNameTargetQueue) $(TargetArchitecture) $(RunQuarantinedTests) $(DotnetEfVersion) $(HelixTimeout) $(TestDependsOnPlaywright) $(DotNetRuntimeSourceFeedKey)</Command>
+        <Command Condition="!$(IsWindowsHelixQueue)">./runtests.sh $(TargetFileName) $(NETCoreSdkVersion) $(MicrosoftNETCoreBrowserDebugHostTransportVersion) $(SharedFxVersion) $(_HelixFriendlyNameTargetQueue) $(TargetArchitecture) $(RunQuarantinedTests) $(DotnetEfVersion) $(HelixTimeout) $(TestDependsOnPlaywright) $(DotNetRuntimeSourceFeedKey)</Command>
         <Command Condition="$(HelixCommand) != ''">$(HelixCommand)</Command>
         <Timeout>$(HelixTimeout)</Timeout>
       </HelixWorkItem>

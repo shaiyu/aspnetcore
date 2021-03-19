@@ -344,39 +344,15 @@ namespace Microsoft.AspNetCore.Components.E2ETest.Tests
             var specialStyleDiv = appElement.FindElement(By.ClassName("special-style"));
             Assert.Equal("50px", specialStyleDiv.GetCssValue("padding"));
 
+            // This style is isolated to the component and comes from the bundle that gets generated for BasicTestApp
+            // and that includes the @import for the TestContentPackage.bundle.scp.css file
+            Assert.Equal("20px", specialStyleDiv.GetCssValue("font-size"));
+
             // The external components are fully functional, not just static HTML
             var externalComponentButton = specialStyleDiv.FindElement(By.TagName("button"));
             Assert.Equal("Click me", externalComponentButton.Text);
             externalComponentButton.Click();
             Browser.Equal("It works", () => externalComponentButton.Text);
-        }
-
-        [Fact]
-        public void CanRenderSvgWithCorrectNamespace()
-        {
-            var appElement = Browser.MountTestComponent<SvgComponent>();
-
-            var svgElement = appElement.FindElement(By.XPath("//*[local-name()='svg' and namespace-uri()='http://www.w3.org/2000/svg']"));
-            Assert.NotNull(svgElement);
-
-            var svgCircleElement = appElement.FindElement(By.XPath("//*[local-name()='circle' and namespace-uri()='http://www.w3.org/2000/svg']"));
-            Assert.NotNull(svgCircleElement);
-            Assert.Equal("10", svgCircleElement.GetAttribute("r"));
-
-            appElement.FindElement(By.TagName("button")).Click();
-            Browser.Equal("20", () => svgCircleElement.GetAttribute("r"));
-        }
-
-        [Fact]
-        public void CanRenderSvgChildComponentWithCorrectNamespace()
-        {
-            var appElement = Browser.MountTestComponent<SvgWithChildComponent>();
-
-            var svgElement = appElement.FindElement(By.XPath("//*[local-name()='svg' and namespace-uri()='http://www.w3.org/2000/svg']"));
-            Assert.NotNull(svgElement);
-
-            var svgCircleElement = appElement.FindElement(By.XPath("//*[local-name()='circle' and namespace-uri()='http://www.w3.org/2000/svg']"));
-            Assert.NotNull(svgCircleElement);
         }
 
         [Fact]
@@ -404,7 +380,12 @@ namespace Microsoft.AspNetCore.Components.E2ETest.Tests
         [Fact]
         public void CanUseFocusExtensionToFocusElement()
         {
+            Browser.Manage().Window.Size = new System.Drawing.Size(100, 300);
             var appElement = Browser.MountTestComponent<ElementFocusComponent>();
+
+            // y scroll position before click
+            var pageYOffsetBefore = getPageYOffset();
+
             var buttonElement = appElement.FindElement(By.Id("focus-button"));
 
             // Make sure the input element isn't focused when the test begins; we don't want
@@ -417,8 +398,51 @@ namespace Microsoft.AspNetCore.Components.E2ETest.Tests
             // Verify that the input element is focused
             Browser.Equal("focus-input", getFocusedElementId);
 
+            // y scroll position ater click
+            var pageYOffsetAfter = getPageYOffset();
+
+            //  Verify that scroll became
+            Assert.True(pageYOffsetAfter > pageYOffsetBefore);
+
             // A local helper that gets the ID of the focused element.
             string getFocusedElementId() => Browser.SwitchTo().ActiveElement().GetAttribute("id");
+
+            // A local helper that gets window.PageYOffset
+            long getPageYOffset() => (long)((IJavaScriptExecutor)Browser).ExecuteScript("return window.pageYOffset");
+        }
+
+        [Fact]
+        public void CanUseFocusExtensionToFocusElementPreventScroll()
+        {
+            Browser.Manage().Window.Size = new System.Drawing.Size(100, 300);
+            var appElement = Browser.MountTestComponent<ElementFocusComponent>();
+
+            // y scroll position before click
+            var pageYOffsetBefore = getPageYOffset();
+
+            var buttonElement = appElement.FindElement(By.Id("focus-button-prevented"));
+
+            // Make sure the input element isn't focused when the test begins; we don't want
+            // the test to pass just because the input started as the focused element
+            Browser.NotEqual("focus-input", getFocusedElementId);
+
+            // Click the button whose callback focuses the input element
+            buttonElement.Click();
+
+            // Verify that the input element is focused
+            Browser.Equal("focus-input", getFocusedElementId);
+
+            // y scroll position ater click
+            var pageYOffsetAfter = getPageYOffset();
+
+            //  Verify that not scrolled
+            Assert.Equal(pageYOffsetAfter, pageYOffsetBefore);
+
+            // A local helper that gets the ID of the focused element.
+            string getFocusedElementId() => Browser.SwitchTo().ActiveElement().GetAttribute("id");
+
+            // A local helper that gets window.PageYOffset
+            long getPageYOffset() => (long)((IJavaScriptExecutor)Browser).ExecuteScript("return window.pageYOffset");
         }
 
         [Fact]
@@ -481,11 +505,10 @@ namespace Microsoft.AspNetCore.Components.E2ETest.Tests
         public void CanUseJsInteropForRefElementsDuringOnAfterRender()
         {
             var appElement = Browser.MountTestComponent<AfterRenderInteropComponent>();
-            Browser.Equal("Value set after render", () => Browser.FindElement(By.TagName("input")).GetAttribute("value"));
+            Browser.Equal("Value set after render", () => Browser.Exists(By.TagName("input")).GetAttribute("value"));
         }
 
         [Fact]
-        [QuarantinedTest]
         public void CanRenderMarkupBlocks()
         {
             var appElement = Browser.MountTestComponent<MarkupBlockComponent>();
@@ -667,6 +690,21 @@ namespace Microsoft.AspNetCore.Components.E2ETest.Tests
                 return completeLIs.Count == 2
                     && completeLIs[0].FindElement(By.CssSelector(".item-isdone")).Selected;
             });
+        }
+
+        [Fact]
+        public void CanHandleClearedChild()
+        {
+            var appElement = Browser.MountTestComponent<ContentEditable>();
+            var input = appElement.FindElement(By.Id("editable-div"));
+            var clickable = appElement.FindElement(By.Id("clickable"));
+
+            input.Clear();
+            clickable.Click();
+
+            var log = Browser.Manage().Logs.GetLog(LogType.Browser);
+            Assert.DoesNotContain(log, entry => entry.Level == LogLevel.Severe);
+            Browser.Equal("", () => input.Text);
         }
     }
 }

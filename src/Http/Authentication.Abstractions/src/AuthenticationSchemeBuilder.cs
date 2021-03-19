@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Microsoft.AspNetCore.Authentication
 {
@@ -20,24 +21,25 @@ namespace Microsoft.AspNetCore.Authentication
         }
 
         /// <summary>
-        /// The name of the scheme being built.
+        /// Gets the name of the scheme being built.
         /// </summary>
         public string Name { get; }
 
         /// <summary>
-        /// The display name for the scheme being built.
+        /// Gets or sets the display name for the scheme being built.
         /// </summary>
         public string? DisplayName { get; set; }
 
         /// <summary>
-        /// The <see cref="IAuthenticationHandler"/> type responsible for this scheme.
+        /// Gets or sets the <see cref="IAuthenticationHandler"/> type responsible for this scheme.
         /// </summary>
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)]
         public Type? HandlerType { get; set; }
 
         /// <summary>
         /// Builds the <see cref="AuthenticationScheme"/> instance.
         /// </summary>
-        /// <returns></returns>
+        /// <returns>The <see cref="AuthenticationScheme"/>.</returns>
         public AuthenticationScheme Build()
         {
             if (HandlerType is null)

@@ -4,9 +4,10 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Linq;
+using System.Net.Http.HPack;
 using System.Text;
-using Microsoft.Net.Http.Headers;
 
 namespace CodeGenerator
 {
@@ -15,15 +16,12 @@ namespace CodeGenerator
         public readonly static KnownHeader[] RequestHeaders;
         public readonly static KnownHeader[] ResponseHeaders;
         public readonly static KnownHeader[] ResponseTrailers;
+        public readonly static long InvalidH2H3ResponseHeadersBits;
 
         static KnownHeaders()
         {
             var requestPrimaryHeaders = new[]
             {
-                ":authority",
-                ":method",
-                ":path",
-                ":scheme",
                 "Accept",
                 "Connection",
                 "Host",
@@ -42,6 +40,7 @@ namespace CodeGenerator
                 "Cache-Control",
                 "Connection",
                 "Date",
+                "Grpc-Encoding",
                 "Keep-Alive",
                 "Pragma",
                 "Trailer",
@@ -89,6 +88,8 @@ namespace CodeGenerator
                 "Cookie",
                 "Expect",
                 "From",
+                "Grpc-Accept-Encoding",
+                "Grpc-Timeout",
                 "Host",
                 "If-Match",
                 "If-Modified-Since",
@@ -107,7 +108,8 @@ namespace CodeGenerator
                 "Request-Id",
                 "Correlation-Context",
                 "TraceParent",
-                "TraceState"
+                "TraceState",
+                "Baggage"
             })
             .Concat(corsRequestHeaders)
             .Select((header, index) => new KnownHeader
@@ -158,6 +160,7 @@ namespace CodeGenerator
                 "ETag",
                 "Location",
                 "Proxy-Authenticate",
+                "Proxy-Connection",
                 "Retry-After",
                 "Server",
                 "Set-Cookie",
@@ -185,6 +188,8 @@ namespace CodeGenerator
             ResponseTrailers = new[]
             {
                 "ETag",
+                "Grpc-Message",
+                "Grpc-Status"
             }
             .Select((header, index) => new KnownHeader
             {
@@ -195,6 +200,20 @@ namespace CodeGenerator
                 PrimaryHeader = responsePrimaryHeaders.Contains(header)
             })
             .ToArray();
+
+            var invalidH2H3ResponseHeaders = new[]
+            {
+                "Connection",
+                "Transfer-Encoding",
+                "Keep-Alive",
+                "Upgrade",
+                "Proxy-Connection"
+            };
+
+            InvalidH2H3ResponseHeadersBits = ResponseHeaders
+                .Where(header => invalidH2H3ResponseHeaders.Contains(header.Name))
+                .Select(header => 1L << header.Index)
+                .Aggregate((a, b) => a | b);
         }
 
         static string Each<T>(IEnumerable<T> values, Func<T, string> formatter)
@@ -210,11 +229,79 @@ namespace CodeGenerator
         static string AppendSwitch(IEnumerable<IGrouping<int, KnownHeader>> values) =>
              $@"switch (name.Length)
             {{{Each(values, byLength => $@"
-                case {byLength.Key}:{AppendSwitchSection(byLength.Key, byLength.OrderBy(h => (h.PrimaryHeader ? "_" : "") + h.Name))}
+                case {byLength.Key}:{AppendSwitchSection(byLength.Key, byLength.OrderBy(h => h, KnownHeaderComparer.Instance).ToList())}
                     break;")}
             }}";
 
-        static string AppendSwitchSection(int length, IOrderedEnumerable<KnownHeader> values)
+        static string AppendHPackSwitch(IEnumerable<HPackGroup> values) =>
+             $@"switch (index)
+            {{{Each(values, header => $@"{Each(header.HPackStaticTableIndexes, index => $@"
+                case {index}:")}
+                    {AppendHPackSwitchSection(header)}")}
+            }}";
+
+        static string AppendValue(bool returnTrue = false) =>
+             $@"// Matched a known header
+                if ((_previousBits & flag) != 0)
+                {{
+                    // Had a previous string for this header, mark it as used so we don't clear it OnHeadersComplete or consider it if we get a second header
+                    _previousBits ^= flag;
+
+                    // We will only reuse this header if there was only one previous header
+                    if (values.Count == 1)
+                    {{
+                        var previousValue = values.ToString();
+                        // Check lengths are the same, then if the bytes were converted to an ascii string if they would be the same.
+                        // We do not consider Utf8 headers for reuse.
+                        if (previousValue.Length == value.Length &&
+                            StringUtilities.BytesOrdinalEqualsStringAndAscii(previousValue, value))
+                        {{
+                            // The previous string matches what the bytes would convert to, so we will just use that one.
+                            _bits |= flag;
+                            return{(returnTrue ? " true" : "")};
+                        }}
+                    }}
+                }}
+
+                // We didn't have a previous matching header value, or have already added a header, so get the string for this value.
+                var valueStr = value.GetRequestHeaderString(nameStr, EncodingSelector);
+                if ((_bits & flag) == 0)
+                {{
+                    // We didn't already have a header set, so add a new one.
+                    _bits |= flag;
+                    values = new StringValues(valueStr);
+                }}
+                else
+                {{
+                    // We already had a header set, so concatenate the new one.
+                    values = AppendValue(values, valueStr);
+                }}";
+
+        static string AppendHPackSwitchSection(HPackGroup group)
+        {
+            var header = group.Header;
+            if (header.Identifier == "ContentLength")
+            {
+                return $@"if (ReferenceEquals(EncodingSelector, KestrelServerOptions.DefaultRequestHeaderEncodingSelector))
+                    {{
+                        AppendContentLength(value);
+                    }}
+                    else
+                    {{
+                        AppendContentLengthCustomEncoding(value, EncodingSelector(HeaderNames.ContentLength));
+                    }}
+                    return true;";
+            }
+            else
+            {
+                return $@"flag = {header.FlagBit()};
+                    values = ref _headers._{header.Identifier};
+                    nameStr = HeaderNames.{header.Identifier};
+                    break;";
+            }
+        }
+
+        static string AppendSwitchSection(int length, IList<KnownHeader> values)
         {
             var useVarForFirstTerm = values.Count() > 1 && values.Select(h => h.FirstNameIgnoreCaseSegment()).Distinct().Count() == 1;
             var firstTermVarExpression = values.Select(h => h.FirstNameIgnoreCaseSegment()).FirstOrDefault();
@@ -255,8 +342,13 @@ namespace CodeGenerator
                 }
             }
 
-            var groups = values.GroupBy(header => header.EqualIgnoreCaseBytesFirstTerm());
-            return start + $@"{Each(groups,  (byFirstTerm, i) => $@"{(byFirstTerm.Count() == 1 ? $@"{Each(byFirstTerm, header => $@"
+            // Group headers together that have the same ignore equal case equals check for the first term.
+            // There will probably only be more than one item in a group for Content-Encoding, Content-Language, Content-Location.
+            var groups = values.GroupBy(header => header.EqualIgnoreCaseBytesFirstTerm())
+                .OrderBy(g => g.First(), KnownHeaderComparer.Instance)
+                .ToList();
+
+            return start + $@"{Each(groups, (byFirstTerm, i) => $@"{(byFirstTerm.Count() == 1 ? $@"{Each(byFirstTerm, header => $@"
                     {(i > 0 ? "else " : "")}if ({header.EqualIgnoreCaseBytes(firstTermVar)})
                     {{{GenerateIfBody(header)}
                     }}")}" : $@"
@@ -268,6 +360,7 @@ namespace CodeGenerator
                     }}")}")}";
         }
 
+        [DebuggerDisplay("{Name}")]
         public class KnownHeader
         {
             public string Name { get; set; }
@@ -281,27 +374,27 @@ namespace CodeGenerator
             public bool FastCount { get; set; }
             public bool EnhancedSetter { get; set; }
             public bool PrimaryHeader { get; set; }
-            public string FlagBit() => $"{"0x" + (1L << Index).ToString("x")}L";
-            public string TestBit() => $"(_bits & {"0x" + (1L << Index).ToString("x")}L) != 0";
-            public string TestTempBit() => $"(tempBits & {"0x" + (1L << Index).ToString("x")}L) != 0";
-            public string TestNotTempBit() => $"(tempBits & ~{"0x" + (1L << Index).ToString("x")}L) == 0";
-            public string TestNotBit() => $"(_bits & {"0x" + (1L << Index).ToString("x")}L) == 0";
-            public string SetBit() => $"_bits |= {"0x" + (1L << Index).ToString("x")}L";
-            public string ClearBit() => $"_bits &= ~{"0x" + (1L << Index).ToString("x")}L";
+            public string FlagBit() => $"{"0x" + (1L << Index).ToString("x", CultureInfo.InvariantCulture)}L";
+            public string TestBit() => $"(_bits & {"0x" + (1L << Index).ToString("x", CultureInfo.InvariantCulture)}L) != 0";
+            public string TestTempBit() => $"(tempBits & {"0x" + (1L << Index).ToString("x", CultureInfo.InvariantCulture)}L) != 0";
+            public string TestNotTempBit() => $"(tempBits & ~{"0x" + (1L << Index).ToString("x", CultureInfo.InvariantCulture)}L) == 0";
+            public string TestNotBit() => $"(_bits & {"0x" + (1L << Index).ToString("x", CultureInfo.InvariantCulture)}L) == 0";
+            public string SetBit() => $"_bits |= {"0x" + (1L << Index).ToString("x", CultureInfo.InvariantCulture)}L";
+            public string ClearBit() => $"_bits &= ~{"0x" + (1L << Index).ToString("x", CultureInfo.InvariantCulture)}L";
 
             private string ResolveIdentifier(string name)
             {
-                var identifer = name.Replace("-", "");
+                var identifier = name.Replace("-", "");
 
                 // Pseudo headers start with a colon. A colon isn't valid in C# names so
                 // remove it and pascal case the header name. e.g. :path -> Path, :scheme -> Scheme.
                 // This identifier will match the names in HeadersNames.cs
-                if (identifer.StartsWith(':'))
+                if (identifier.StartsWith(':'))
                 {
-                    identifer = char.ToUpper(identifer[1]) + identifer.Substring(2);
+                    identifier = char.ToUpperInvariant(identifier[1]) + identifier.Substring(2);
                 }
 
-                return identifer;
+                return identifier;
             }
 
             private void GetMaskAndComp(string name, int offset, int count, out ulong mask, out ulong comp)
@@ -580,7 +673,7 @@ namespace CodeGenerator
             var responseTrailers = ResponseTrailers;
 
             var allHeaderNames = RequestHeaders.Concat(ResponseHeaders).Concat(ResponseTrailers)
-                .Select(h => h.Identifier).Distinct().OrderBy(n => n).ToArray();
+                .Select(h => h.Identifier).Distinct().OrderBy(n => n, StringComparer.InvariantCulture).ToArray();
 
             var loops = new[]
             {
@@ -629,6 +722,8 @@ using System.Runtime.InteropServices;
 using Microsoft.Extensions.Primitives;
 using Microsoft.Net.Http.Headers;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Infrastructure;
+
+#nullable enable
 
 namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
 {{
@@ -887,7 +982,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
                 {{
                     return;
                 }}
-                tempBits &= ~{"0x" + (1L << header.Index).ToString("x")}L;
+                tempBits &= ~{"0x" + (1L << header.Index).ToString("x", CultureInfo.InvariantCulture)}L;
             }}
             ")}
         }}
@@ -903,7 +998,7 @@ $@"        private void Clear(long bitsToClear)
                 {{
                     return;
                 }}
-                tempBits &= ~{"0x" + (1L << header.Index).ToString("x")}L;
+                tempBits &= ~{"0x" + (1L << header.Index).ToString("x" , CultureInfo.InvariantCulture)}L;
             }}
             ")}
         }}
@@ -933,14 +1028,19 @@ $@"        private void Clear(long bitsToClear)
                     array[arrayIndex] = new KeyValuePair<string, StringValues>(HeaderNames.ContentLength, HeaderUtilities.FormatNonNegativeInt64(_contentLength.Value));
                     ++arrayIndex;
                 }}
-            ((ICollection<KeyValuePair<string, StringValues>>)MaybeUnknown)?.CopyTo(array, arrayIndex);
+            ((ICollection<KeyValuePair<string, StringValues>>?)MaybeUnknown)?.CopyTo(array, arrayIndex);
 
             return true;
         }}
         {(loop.ClassName == "HttpResponseHeaders" ? $@"
+        internal bool HasInvalidH2H3Headers => (_bits & {InvalidH2H3ResponseHeadersBits}) != 0;
+        internal void ClearInvalidH2H3Headers()
+        {{
+            _bits &= ~{InvalidH2H3ResponseHeadersBits};
+        }}
         internal unsafe void CopyToFast(ref BufferWriter<PipeWriter> output)
         {{
-            var tempBits = (ulong)_bits | (_contentLength.HasValue ? {"0x" + (1L << 63).ToString("x")}L : 0);
+            var tempBits = (ulong)_bits | (_contentLength.HasValue ? {"0x" + (1L << 63).ToString("x" , CultureInfo.InvariantCulture)}L : 0);
             var next = 0;
             var keyStart = 0;
             var keyLength = 0;
@@ -953,7 +1053,7 @@ $@"        private void Clear(long bitsToClear)
                     case {hi.Index}: // Header: ""{hi.Header.Name}""
                         if ({hi.Header.TestTempBit()})
                         {{
-                            tempBits ^= {"0x" + (1L << hi.Header.Index).ToString("x")}L;{(hi.Header.Identifier != "ContentLength" ? $@"{(hi.Header.EnhancedSetter == false ? $@"
+                            tempBits ^= {"0x" + (1L << hi.Header.Index).ToString("x" , CultureInfo.InvariantCulture)}L;{(hi.Header.Identifier != "ContentLength" ? $@"{(hi.Header.EnhancedSetter == false ? $@"
                             values = ref _headers._{hi.Header.Identifier};
                             keyStart = {hi.Header.BytesOffset};
                             keyLength = {hi.Header.BytesCount};
@@ -972,7 +1072,7 @@ $@"        private void Clear(long bitsToClear)
                                 break; // OutputHeader
                             }}")}" : $@"
                             output.Write(HeaderBytes.Slice({hi.Header.BytesOffset}, {hi.Header.BytesCount}));
-                            output.WriteNumeric((ulong)ContentLength.Value);
+                            output.WriteNumeric((ulong)ContentLength.GetValueOrDefault());
                             if (tempBits == 0)
                             {{
                                 return;
@@ -1007,46 +1107,12 @@ $@"        private void Clear(long bitsToClear)
             ref StringValues values = ref Unsafe.AsRef<StringValues>(null);
             var flag = 0L;
 
-            // Does the name matched any ""known"" headers
+            // Does the name match any ""known"" headers
             {AppendSwitch(loop.Headers.GroupBy(x => x.Name.Length).OrderBy(x => x.Key))}
 
             if (flag != 0)
             {{
-                // Matched a known header
-                if ((_previousBits & flag) != 0)
-                {{
-                    // Had a previous string for this header, mark it as used so we don't clear it OnHeadersComplete or consider it if we get a second header
-                    _previousBits ^= flag;
-
-                    // We will only reuse this header if there was only one previous header
-                    if (values.Count == 1)
-                    {{
-                        var previousValue = values.ToString();
-                        // Check lengths are the same, then if the bytes were converted to an ascii string if they would be the same.
-                        // We do not consider Utf8 headers for reuse.
-                        if (previousValue.Length == value.Length &&
-                            StringUtilities.BytesOrdinalEqualsStringAndAscii(previousValue, value))
-                        {{
-                            // The previous string matches what the bytes would convert to, so we will just use that one.
-                            _bits |= flag;
-                            return;
-                        }}
-                    }}
-                }}
-
-                // We didn't have a previous matching header value, or have already added a header, so get the string for this value.
-                var valueStr = value.GetRequestHeaderString(nameStr, EncodingSelector);
-                if ((_bits & flag) == 0)
-                {{
-                    // We didn't already have a header set, so add a new one.
-                    _bits |= flag;
-                    values = new StringValues(valueStr);
-                }}
-                else
-                {{
-                    // We already had a header set, so concatenate the new one.
-                    values = AppendValue(values, valueStr);
-                }}
+                {AppendValue()}
             }}
             else
             {{
@@ -1057,13 +1123,34 @@ $@"        private void Clear(long bitsToClear)
                 var valueStr = value.GetRequestHeaderString(nameStr, EncodingSelector);
                 AppendUnknownHeaders(nameStr, valueStr);
             }}
+        }}
+
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+        public unsafe bool TryHPackAppend(int index, ReadOnlySpan<byte> value)
+        {{
+            ref StringValues values = ref Unsafe.AsRef<StringValues>(null);
+            var nameStr = string.Empty;
+            var flag = 0L;
+
+            // Does the HPack static index match any ""known"" headers
+            {AppendHPackSwitch(GroupHPack(loop.Headers))}
+
+            if (flag != 0)
+            {{
+                {AppendValue(returnTrue: true)}
+                return true;
+            }}
+            else
+            {{
+                return false;
+            }}
         }}" : "")}
 
         private struct HeaderReferences
         {{{Each(loop.Headers.Where(header => header.Identifier != "ContentLength"), header => @"
             public StringValues _" + header.Identifier + ";")}
             {Each(loop.Headers.Where(header => header.EnhancedSetter), header => @"
-            public byte[] _raw" + header.Identifier + ";")}
+            public byte[]? _raw" + header.Identifier + ";")}
         }}
 
         public partial struct Enumerator
@@ -1111,6 +1198,55 @@ $@"        private void Clear(long bitsToClear)
         }}
     }}
 ")}}}";
+        }
+
+        private static IEnumerable<HPackGroup> GroupHPack(KnownHeader[] headers)
+        {
+            var staticHeaders = new (int Index, HeaderField HeaderField)[H2StaticTable.Count];
+            for (var i = 0; i < H2StaticTable.Count; i++)
+            {
+                staticHeaders[i] = (i + 1, H2StaticTable.Get(i));
+            }
+
+            var groupedHeaders = staticHeaders.GroupBy(h => Encoding.ASCII.GetString(h.HeaderField.Name)).Select(g =>
+            {
+                return new HPackGroup
+                {
+                    Name = g.Key,
+                    Header = headers.SingleOrDefault(knownHeader => string.Equals(knownHeader.Name, g.Key, StringComparison.OrdinalIgnoreCase)),
+                    HPackStaticTableIndexes = g.Select(h => h.Index).ToArray()
+                };
+            }).Where(g => g.Header != null).ToList();
+
+            return groupedHeaders;
+        }
+
+        private class HPackGroup
+        {
+            public int[] HPackStaticTableIndexes { get; set; }
+            public KnownHeader Header { get; set; }
+            public string Name { get; set; }
+        }
+
+        private class KnownHeaderComparer : IComparer<KnownHeader>
+        {
+            public static readonly KnownHeaderComparer Instance = new KnownHeaderComparer();
+
+            public int Compare(KnownHeader x, KnownHeader y)
+            {
+                // Primary headers appear first
+                if (x.PrimaryHeader && !y.PrimaryHeader)
+                {
+                    return -1;
+                }
+                if (y.PrimaryHeader && !x.PrimaryHeader)
+                {
+                    return 1;
+                }
+
+                // Then alphabetical
+                return StringComparer.InvariantCulture.Compare(x.Name, y.Name);
+            }
         }
     }
 }

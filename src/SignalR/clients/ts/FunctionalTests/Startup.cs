@@ -150,6 +150,20 @@ namespace FunctionalTests
 
             app.Use((context, next) =>
             {
+                if (context.Request.Path.StartsWithSegments("/echoredirect"))
+                {
+                    var url = context.Request.Path.ToString();
+                    url = url.Replace("echoredirect", "echo");
+                    url += context.Request.QueryString.ToString();
+                    context.Response.Redirect(url, false, true);
+                    return Task.CompletedTask;
+                }
+
+                return next.Invoke();
+            });
+
+            app.Use((context, next) =>
+            {
                 if (context.Request.Path.StartsWithSegments("/redirect"))
                 {
                     var newUrl = context.Request.Query["baseUrl"] + "/testHub?numRedirects=" + Interlocked.Increment(ref _numRedirects);
@@ -163,9 +177,21 @@ namespace FunctionalTests
             {
                 if (context.Request.Path.Value.Contains("/negotiate"))
                 {
-                    context.Response.Cookies.Append("testCookie", "testValue");
-                    context.Response.Cookies.Append("testCookie2", "testValue2");
-                    context.Response.Cookies.Append("expiredCookie", "doesntmatter", new CookieOptions() { Expires = DateTimeOffset.Now.AddHours(-1) });
+                    var cookieOptions = new CookieOptions();
+                    var expiredCookieOptions = new CookieOptions() { Expires = DateTimeOffset.Now.AddHours(-1) };
+                    if (context.Request.IsHttps)
+                    {
+                        cookieOptions.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.None;
+                        cookieOptions.Secure = true;
+
+                        expiredCookieOptions.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.None;
+                        expiredCookieOptions.Secure = true;
+                    }
+                    context.Response.Cookies.Append("testCookie", "testValue", cookieOptions);
+                    context.Response.Cookies.Append("testCookie2", "testValue2", cookieOptions);
+
+                    cookieOptions.Expires = DateTimeOffset.Now.AddHours(-1);
+                    context.Response.Cookies.Append("expiredCookie", "doesntmatter", expiredCookieOptions);
                 }
 
                 await next.Invoke();
@@ -177,7 +203,7 @@ namespace FunctionalTests
             // This is for testing purposes only (karma hosts the client on its own server), never do this in production
             app.UseCors(policy =>
             {
-                policy.SetIsOriginAllowed(host => host.StartsWith("http://localhost:") || host.StartsWith("http://127.0.0.1:"))
+                policy.SetIsOriginAllowed(host => host.StartsWith("http://localhost:", StringComparison.Ordinal) || host.StartsWith("http://127.0.0.1:", StringComparison.Ordinal))
                     .AllowAnyHeader()
                     .AllowAnyMethod()
                     .AllowCredentials();

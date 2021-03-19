@@ -6,19 +6,16 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Web;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Fakes;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Tests.Fakes;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Http.Extensions;
 using Microsoft.AspNetCore.Http.Features;
-using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.AspNetCore.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -41,7 +38,7 @@ namespace Microsoft.AspNetCore.Hosting
 
             using (var host = builder.UseStartup("MyStartupAssembly").Build())
             {
-                var options = new WebHostOptions(host.Services.GetRequiredService<IConfiguration>());
+                var options = CreateWebHostOptions(host.Services.GetRequiredService<IConfiguration>());
                 Assert.Equal("MyStartupAssembly", options.ApplicationName);
                 Assert.Equal("MyStartupAssembly", options.StartupAssembly);
             }
@@ -85,7 +82,7 @@ namespace Microsoft.AspNetCore.Hosting
         public void UseStartupThrowsWhenFactoryReturnsNull(IWebHostBuilder builder)
         {
             var server = new TestServer();
-            var ex = Assert.Throws<InvalidOperationException>(() => builder.UseServer(server).UseStartup(context => null).Build());
+            var ex = Assert.Throws<InvalidOperationException>(() => builder.UseServer(server).UseStartup<object>(context => null).Build());
             Assert.Equal("The specified factory returned null startup instance.", ex.Message);
         }
 
@@ -96,7 +93,7 @@ namespace Microsoft.AspNetCore.Hosting
             var server = new TestServer();
             var host = builder.UseServer(server)
                               .UseStartup<StartupCtorThrows>()
-                              .UseStartup(context => throw new InvalidOperationException("This doesn't run"))
+                              .UseStartup<object>(context => throw new InvalidOperationException("This doesn't run"))
                               .Configure(app =>
                               {
                                   throw new InvalidOperationException("This doesn't run");
@@ -118,6 +115,7 @@ namespace Microsoft.AspNetCore.Hosting
 
         [Theory]
         [MemberData(nameof(DefaultWebHostBuildersWithConfig))]
+        [QuarantinedTest("https://github.com/dotnet/aspnetcore/issues/30582")]
         public async Task UseStartupFactoryWorks(IWebHostBuilder builder)
         {
             void ConfigureServices(IServiceCollection services) { }
@@ -506,7 +504,7 @@ namespace Microsoft.AspNetCore.Hosting
 
             using (var host = hostBuilder.Build())
             {
-                var options = new WebHostOptions(host.Services.GetRequiredService<IConfiguration>());
+                var options = CreateWebHostOptions(host.Services.GetRequiredService<IConfiguration>());
                 Assert.Equal("EnvB", options.Environment);
             }
         }
@@ -532,7 +530,7 @@ namespace Microsoft.AspNetCore.Hosting
 
             using (var host = hostBuilder.Build())
             {
-                var options = new WebHostOptions(host.Services.GetRequiredService<IConfiguration>());
+                var options = CreateWebHostOptions(host.Services.GetRequiredService<IConfiguration>());
                 Assert.Equal("EnvB", options.Environment);
             }
         }
@@ -558,7 +556,7 @@ namespace Microsoft.AspNetCore.Hosting
 
             using (var host = hostBuilder.Build())
             {
-                var options = new WebHostOptions(host.Services.GetRequiredService<IConfiguration>());
+                var options = CreateWebHostOptions(host.Services.GetRequiredService<IConfiguration>());
                 Assert.Equal("EnvB", options.Environment);
             }
         }
@@ -593,7 +591,7 @@ namespace Microsoft.AspNetCore.Hosting
 
             using (var host = hostBuilder.Build())
             {
-                var options = new WebHostOptions(host.Services.GetRequiredService<IConfiguration>());
+                var options = CreateWebHostOptions(host.Services.GetRequiredService<IConfiguration>());
                 Assert.Equal("EnvB", options.Environment);
             }
         }
@@ -1269,7 +1267,7 @@ namespace Microsoft.AspNetCore.Hosting
 
             using (var host = builder.Build())
             {
-                var options = new WebHostOptions(host.Services.GetRequiredService<IConfiguration>());
+                var options = CreateWebHostOptions(host.Services.GetRequiredService<IConfiguration>());
                 Assert.Equal(TimeSpan.FromSeconds(102), options.ShutdownTimeout);
             }
         }
@@ -1395,6 +1393,13 @@ namespace Microsoft.AspNetCore.Hosting
             await host.StopAsync();
         }
 
+        private WebHostOptions CreateWebHostOptions(IConfiguration configuration, string applicationNameFallback = null)
+        {
+            return new WebHostOptions(
+                configuration,
+                applicationNameFallback: applicationNameFallback);
+        }
+
         private class StartOrder
         {
             public int Order { get; set; }
@@ -1431,7 +1436,7 @@ namespace Microsoft.AspNetCore.Hosting
 
             public StartOrder Ordering { get; }
 
-            public IFeatureCollection Features => null;
+            public IFeatureCollection Features { get; } = new FeatureCollection();
 
             public Task StartAsync<TContext>(IHttpApplication<TContext> application, CancellationToken cancellationToken)
             {
@@ -1547,7 +1552,7 @@ namespace Microsoft.AspNetCore.Hosting
 
         private class TestServer : IServer
         {
-            IFeatureCollection IServer.Features { get; }
+            IFeatureCollection IServer.Features { get; } = new FeatureCollection();
             public RequestDelegate RequestDelegate { get; private set; }
 
             public void Dispose() { }

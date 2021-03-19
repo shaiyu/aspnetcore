@@ -6,22 +6,23 @@ using System.Collections.Generic;
 using System.IO.Pipelines;
 using System.Net;
 using System.Threading;
+using Microsoft.AspNetCore.Connections.Experimental;
 using Microsoft.AspNetCore.Http.Features;
 
 namespace Microsoft.AspNetCore.Connections
 {
     internal abstract partial class TransportMultiplexedConnection : MultiplexedConnectionContext
     {
-        private IDictionary<object, object> _items;
-        private string _connectionId;
+        private IDictionary<object, object?>? _items;
+        private string? _connectionId;
 
         public TransportMultiplexedConnection()
         {
             FastReset();
         }
 
-        public override EndPoint LocalEndPoint { get; set; }
-        public override EndPoint RemoteEndPoint { get; set; }
+        public override EndPoint? LocalEndPoint { get; set; }
+        public override EndPoint? RemoteEndPoint { get; set; }
 
         public override string ConnectionId
         {
@@ -42,11 +43,11 @@ namespace Microsoft.AspNetCore.Connections
 
         public override IFeatureCollection Features => this;
 
-        public virtual MemoryPool<byte> MemoryPool { get; }
+        public virtual MemoryPool<byte> MemoryPool { get; } = default!;
 
-        public IDuplexPipe Application { get; set; }
+        public IDuplexPipe Application { get; set; } = default!;
 
-        public override IDictionary<object, object> Items
+        public override IDictionary<object, object?> Items
         {
             get
             {

@@ -2,13 +2,20 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
-using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 
 namespace Microsoft.AspNetCore.Http.Features
 {
+    /// <summary>
+    /// A reference to a collection of features.
+    /// </summary>
+    /// <typeparam name="TCache">The type of the feature.</typeparam>
     public struct FeatureReferences<TCache>
     {
+        /// <summary>
+        /// Initializes a new instance of <see cref="FeatureReferences{TCache}"/>.
+        /// </summary>
+        /// <param name="collection">The <see cref="IFeatureCollection"/>.</param>
         public FeatureReferences(IFeatureCollection collection)
         {
             Collection = collection;
@@ -16,6 +23,10 @@ namespace Microsoft.AspNetCore.Http.Features
             Revision = collection.Revision;
         }
 
+        /// <summary>
+        /// Initializes the <see cref="FeatureReferences{TCache}"/>.
+        /// </summary>
+        /// <param name="collection">The <see cref="IFeatureCollection"/> to initialize with.</param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Initalize(IFeatureCollection collection)
         {
@@ -23,6 +34,11 @@ namespace Microsoft.AspNetCore.Http.Features
             Collection = collection;
         }
 
+        /// <summary>
+        /// Initializes the <see cref="FeatureReferences{TCache}"/>.
+        /// </summary>
+        /// <param name="collection">The <see cref="IFeatureCollection"/> to initialize with.</param>
+        /// <param name="revision">The version of the <see cref="IFeatureCollection"/>.</param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Initalize(IFeatureCollection collection, int revision)
         {
@@ -30,15 +46,24 @@ namespace Microsoft.AspNetCore.Http.Features
             Collection = collection;
         }
 
+        /// <summary>
+        /// Gets the <see cref="IFeatureCollection"/>.
+        /// </summary>
         public IFeatureCollection Collection { get; private set; }
+
+        /// <summary>
+        /// Gets the revision number.
+        /// </summary>
         public int Revision { get; private set; }
 
         // cache is a public field because the code calling Fetch must
         // be able to pass ref values that "dot through" the TCache struct memory, 
         // if it was a Property then that getter would return a copy of the memory
         // preventing the use of "ref"
-        [AllowNull, MaybeNull]
-        public TCache Cache;
+        /// <summary>
+        /// This API is part of ASP.NET Core's infrastructure and should not be referenced by application code.
+        /// </summary>
+        public TCache? Cache;
 
         // Careful with modifications to the Fetch method; it is carefully constructed for inlining
         // See: https://github.com/aspnet/HttpAbstractions/pull/704
@@ -60,11 +85,15 @@ namespace Microsoft.AspNetCore.Http.Features
         // if a reset or update is required and all the reset and update logic is pushed to UpdateCached.
         //
         // Generally Fetch is called at a ratio > x4 of UpdateCached so this is a large gain
+
+        /// <summary>
+        /// This API is part of ASP.NET Core's infrastructure and should not be referenced by application code.
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public TFeature Fetch<TFeature, TState>(
-            [AllowNull, MaybeNull] ref TFeature cached,
+        public TFeature? Fetch<TFeature, TState>(
+            ref TFeature? cached,
             TState state,
-            Func<TState, TFeature> factory) where TFeature : class?
+            Func<TState, TFeature?> factory) where TFeature : class?
         {
             var flush = false;
             var revision = Collection?.Revision ?? ContextDisposed();
@@ -80,7 +109,7 @@ namespace Microsoft.AspNetCore.Http.Features
         }
 
         // Update and cache clearing logic, when the fast-path in Fetch isn't applicable
-        private TFeature UpdateCached<TFeature, TState>(ref TFeature cached, TState state, Func<TState, TFeature> factory, int revision, bool flush) where TFeature : class?
+        private TFeature? UpdateCached<TFeature, TState>(ref TFeature? cached, TState state, Func<TState, TFeature?> factory, int revision, bool flush) where TFeature : class?
         {
             if (flush)
             {
@@ -108,8 +137,11 @@ namespace Microsoft.AspNetCore.Http.Features
             return cached;
         }
 
-        public TFeature Fetch<TFeature>([AllowNull, MaybeNull] ref TFeature cached, Func<IFeatureCollection, TFeature> factory)
-            where TFeature : class? => Fetch(ref cached!, Collection, factory);
+        /// <summary>
+        /// This API is part of ASP.NET Core's infrastructure and should not be referenced by application code.
+        /// </summary>
+        public TFeature? Fetch<TFeature>(ref TFeature? cached, Func<IFeatureCollection, TFeature?> factory)
+            where TFeature : class? => Fetch(ref cached, Collection, factory);
 
         private static int ContextDisposed()
         {

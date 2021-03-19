@@ -24,7 +24,7 @@ namespace Microsoft.AspNetCore.Server.HttpSys
         private static readonly int AuthInfoSize =
             Marshal.SizeOf<HttpApiTypes.HTTP_SERVER_AUTHENTICATION_INFO>();
 
-        private UrlGroup _urlGroup;
+        private UrlGroup? _urlGroup;
         private AuthenticationSchemes _authSchemes;
         private bool _allowAnonymous = true;
 
@@ -64,7 +64,7 @@ namespace Microsoft.AspNetCore.Server.HttpSys
         /// <summary> 
         /// Sets the display name shown to users on login pages. The default is null.
         /// </summary> 
-        public string AuthenticationDisplayName { get; set; }
+        public string? AuthenticationDisplayName { get; set; }
 
         internal void SetUrlGroupSecurity(UrlGroup urlGroup)
         {
@@ -107,12 +107,12 @@ namespace Microsoft.AspNetCore.Server.HttpSys
 
         internal static IList<string> GenerateChallenges(AuthenticationSchemes authSchemes)
         {
-            IList<string> challenges = new List<string>();
-
             if (authSchemes == AuthenticationSchemes.None)
             {
-                return challenges;
+                return Array.Empty<string>();
             }
+
+            IList<string> challenges = new List<string>();
 
             // Order by strength.
             if ((authSchemes & AuthenticationSchemes.Kerberos) == AuthenticationSchemes.Kerberos)

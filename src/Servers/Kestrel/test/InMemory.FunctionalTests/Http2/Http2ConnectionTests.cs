@@ -4,6 +4,7 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -36,16 +37,16 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
             _connection.ServerSettings.MaxConcurrentStreams = 2;
 
             await StartStreamAsync(1, _browserRequestHeaders, endStream: false);
-            Assert.Equal(0, TestApplicationErrorLogger.Messages.Count(m => m.EventId.Name == "Http2MaxConcurrentStreamsReached"));
+            Assert.Equal(0, LogMessages.Count(m => m.EventId.Name == "Http2MaxConcurrentStreamsReached"));
 
             // Log message because we've reached the stream limit
             await StartStreamAsync(3, _browserRequestHeaders, endStream: false);
-            Assert.Equal(1, TestApplicationErrorLogger.Messages.Count(m => m.EventId.Name == "Http2MaxConcurrentStreamsReached"));
+            Assert.Equal(1, LogMessages.Count(m => m.EventId.Name == "Http2MaxConcurrentStreamsReached"));
 
             // This stream will error because it exceeds max concurrent streams
             await StartStreamAsync(5, _browserRequestHeaders, endStream: true);
             await WaitForStreamErrorAsync(5, Http2ErrorCode.REFUSED_STREAM, CoreStrings.Http2ErrorMaxStreams);
-            Assert.Equal(1, TestApplicationErrorLogger.Messages.Count(m => m.EventId.Name == "Http2MaxConcurrentStreamsReached"));
+            Assert.Equal(1, LogMessages.Count(m => m.EventId.Name == "Http2MaxConcurrentStreamsReached"));
 
             await StopConnectionAsync(expectedLastStreamId: 5, ignoreNonGoAwayFrames: false);
         }
@@ -478,7 +479,58 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
             Assert.Equal(0, _connection.StreamPool.Count);
 
             await StopConnectionAsync(expectedLastStreamId: 3, ignoreNonGoAwayFrames: false);
+        }
 
+        [Fact]
+        public async Task StreamPool_UnusedExpiredStream_RemovedFromPool()
+        {
+            DateTimeOffset now = _serviceContext.MockSystemClock.UtcNow;
+
+            // Heartbeat
+            TriggerTick(now);
+
+            var serverTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            await InitializeConnectionAsync(async context =>
+            {
+                await _echoApplication(context);
+            });
+
+            Assert.Equal(0, _connection.StreamPool.Count);
+
+            await StartStreamAsync(1, _browserRequestHeaders, endStream: true);
+
+            await ExpectAsync(Http2FrameType.HEADERS,
+                withLength: 36,
+                withFlags: (byte)(Http2HeadersFrameFlags.END_HEADERS | Http2HeadersFrameFlags.END_STREAM),
+                withStreamId: 1);
+
+            // Ping will trigger the stream to be returned to the pool so we can assert it
+            await SendPingAsync(Http2PingFrameFlags.NONE);
+            await ExpectAsync(Http2FrameType.PING,
+                withLength: 8,
+                withFlags: (byte)Http2PingFrameFlags.ACK,
+                withStreamId: 0);
+
+            // Stream has been returned to the pool
+            Assert.Equal(1, _connection.StreamPool.Count);
+
+            _connection.StreamPool.TryPeek(out var pooledStream);
+
+            TriggerTick(now + TimeSpan.FromSeconds(1));
+
+            // Stream has not expired and is still in pool
+            Assert.Equal(1, _connection.StreamPool.Count);
+
+            TriggerTick(now + TimeSpan.FromSeconds(6));
+
+            // Stream has expired and has been removed from pool
+            Assert.Equal(0, _connection.StreamPool.Count);
+
+            // Removed stream should have been disposed
+            Assert.True(((Http2OutputProducer)pooledStream.Output)._disposed);
+
+            await StopConnectionAsync(expectedLastStreamId: 1, ignoreNonGoAwayFrames: false);
         }
 
         [Fact]
@@ -1119,7 +1171,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
 
             await WaitForStreamErrorAsync(expectedStreamId: 1, Http2ErrorCode.NO_ERROR, null);
             // Logged without an exception.
-            Assert.Contains(TestApplicationErrorLogger.Messages, m => m.Message.Contains("the application completed without reading the entire request body."));
+            Assert.Contains(LogMessages, m => m.Message.Contains("the application completed without reading the entire request body."));
 
             // Writing over half the initial window size induces a connection-level window update.
             // But no stream window update since this is the last frame.
@@ -1409,29 +1461,83 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
         }
 
         [Fact]
-        public async Task Frame_MultipleStreams_RequestsNotFinished_EnhanceYourCalm()
+        public async Task MaxTrackedStreams_SmallMaxConcurrentStreams_LowerLimitOf100Async()
         {
             _serviceContext.ServerOptions.Limits.Http2.MaxStreamsPerConnection = 1;
+
+            await InitializeConnectionAsync(_noopApplication);
+
+            Assert.Equal((uint)100, _connection.MaxTrackedStreams);
+
+            await StopConnectionAsync(0, ignoreNonGoAwayFrames: false);
+        }
+
+        [Fact]
+        public async Task MaxTrackedStreams_DefaultMaxConcurrentStreams_DoubleLimit()
+        {
+            _serviceContext.ServerOptions.Limits.Http2.MaxStreamsPerConnection = 100;
+
+            await InitializeConnectionAsync(_noopApplication);
+
+            Assert.Equal((uint)200, _connection.MaxTrackedStreams);
+
+            await StopConnectionAsync(0, ignoreNonGoAwayFrames: false);
+        }
+
+        [Fact]
+        public async Task MaxTrackedStreams_LargeMaxConcurrentStreams_DoubleLimit()
+        {
+            _serviceContext.ServerOptions.Limits.Http2.MaxStreamsPerConnection = int.MaxValue;
+
+            await InitializeConnectionAsync(_noopApplication);
+
+            Assert.Equal((uint)int.MaxValue * 2, _connection.MaxTrackedStreams);
+
+            await StopConnectionAsync(0, ignoreNonGoAwayFrames: false);
+        }
+
+        [Fact]
+        public Task Frame_MultipleStreams_RequestsNotFinished_LowMaxStreamsPerConnection_EnhanceYourCalmAfter100()
+        {
+            // Kestrel always tracks at least 100 streams
+            return RequestUntilEnhanceYourCalm(maxStreamsPerConnection: 1, sentStreams: 101);
+        }
+
+        [Fact]
+        [QuarantinedTest("https://github.com/dotnet/aspnetcore/issues/30309")]
+        public Task Frame_MultipleStreams_RequestsNotFinished_DefaultMaxStreamsPerConnection_EnhanceYourCalmAfterDoubleMaxStreams()
+        {
+            // Kestrel tracks max streams per connection * 2
+            return RequestUntilEnhanceYourCalm(maxStreamsPerConnection: 100, sentStreams: 201);
+        }
+
+        private async Task RequestUntilEnhanceYourCalm(int maxStreamsPerConnection, int sentStreams)
+        {
+            _serviceContext.ServerOptions.Limits.Http2.MaxStreamsPerConnection = maxStreamsPerConnection;
             var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             await InitializeConnectionAsync(async context =>
             {
                 await tcs.Task.DefaultTimeout();
             });
 
-            await StartStreamAsync(1, _browserRequestHeaders, endStream: false);
-            await SendRstStreamAsync(1);
-            await StartStreamAsync(3, _browserRequestHeaders, endStream: true);
-            await SendRstStreamAsync(3);
-            await StartStreamAsync(5, _browserRequestHeaders, endStream: true);
+            var streamId = 1;
+            for (var i = 0; i < sentStreams - 1; i++)
+            {
+                await StartStreamAsync(streamId, _browserRequestHeaders, endStream: true);
+                await SendRstStreamAsync(streamId);
 
+                streamId += 2;
+            }
+
+            await StartStreamAsync(streamId, _browserRequestHeaders, endStream: true);
             await WaitForStreamErrorAsync(
-                expectedStreamId: 5,
+                expectedStreamId: streamId,
                 expectedErrorCode: Http2ErrorCode.ENHANCE_YOUR_CALM,
                 expectedErrorMessage: CoreStrings.Http2TellClientToCalmDown);
 
             tcs.SetResult();
 
-            await StopConnectionAsync(5, ignoreNonGoAwayFrames: false);
+            await StopConnectionAsync(streamId, ignoreNonGoAwayFrames: false);
         }
 
         [Fact]
@@ -1991,12 +2097,13 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
 
             public void OnStaticIndexedHeader(int index)
             {
-                throw new NotImplementedException();
+                ref readonly var entry = ref H2StaticTable.Get(index - 1);
+                OnHeader(entry.Name, entry.Value);
             }
 
             public void OnStaticIndexedHeader(int index, ReadOnlySpan<byte> value)
             {
-                throw new NotImplementedException();
+                OnHeader(H2StaticTable.Get(index - 1).Name, value);
             }
         }
 
@@ -2434,7 +2541,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
             });
             for (var i = 0; i < 100; i++)
             {
-                headers.Add(new KeyValuePair<string, string>(i.ToString(), i.ToString()));
+                headers.Add(new KeyValuePair<string, string>(i.ToString(CultureInfo.InvariantCulture), i.ToString(CultureInfo.InvariantCulture)));
             }
 
             return HEADERS_Received_InvalidHeaderFields_ConnectionError(headers, CoreStrings.BadRequest_TooManyHeaders);
@@ -4319,7 +4426,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
             _pair.Application.Output.Complete(new ConnectionResetException(string.Empty));
 
             await StopConnectionAsync(1, ignoreNonGoAwayFrames: false);
-            Assert.Single(TestApplicationErrorLogger.Messages, m => m.Exception is ConnectionResetException);
+            Assert.Single(LogMessages, m => m.Exception is ConnectionResetException);
         }
 
         [Fact]
@@ -4330,7 +4437,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
             _pair.Application.Output.Complete(new ConnectionResetException(string.Empty));
 
             await WaitForConnectionStopAsync(expectedLastStreamId: 0, ignoreNonGoAwayFrames: false);
-            Assert.DoesNotContain(TestApplicationErrorLogger.Messages, m => m.Exception is ConnectionResetException);
+            Assert.DoesNotContain(LogMessages, m => m.Exception is ConnectionResetException);
         }
 
         [Fact]
@@ -4521,11 +4628,11 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
 
             Assert.Equal(TaskStatus.RanToCompletion, _connection.ProcessRequestsAsync(new DummyApplication(_noopApplication)).Status);
 
-            Assert.All(TestApplicationErrorLogger.Messages, w => Assert.InRange(w.LogLevel, LogLevel.Trace, LogLevel.Debug));
+            Assert.All(LogMessages, w => Assert.InRange(w.LogLevel, LogLevel.Trace, LogLevel.Debug));
 
-            var logMessage = TestApplicationErrorLogger.Messages.Single(m => m.EventId == 20);
+            var logMessage = LogMessages.Single(m => m.EventId == 20);
 
-            Assert.Equal("Connection id \"(null)\" request processing ended abnormally.", logMessage.Message);
+            Assert.Equal("Connection id \"TestConnectionId\" request processing ended abnormally.", logMessage.Message);
             Assert.Same(ioException, logMessage.Exception);
         }
 
@@ -4539,7 +4646,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
 
             Assert.Equal(TaskStatus.RanToCompletion, _connection.ProcessRequestsAsync(new DummyApplication(_noopApplication)).Status);
 
-            var logMessage = TestApplicationErrorLogger.Messages.Single(m => m.LogLevel >= LogLevel.Information);
+            var logMessage = LogMessages.Single(m => m.LogLevel >= LogLevel.Information);
 
             Assert.Equal(LogLevel.Warning, logMessage.LogLevel);
             Assert.Equal(CoreStrings.RequestProcessingEndError, logMessage.Message);
@@ -4572,7 +4679,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
 
             await WaitForStreamErrorAsync(1, Http2ErrorCode.NO_ERROR, null);
             // Logged without an exception.
-            Assert.Contains(TestApplicationErrorLogger.Messages, m => m.Message.Contains("the application completed without reading the entire request body."));
+            Assert.Contains(LogMessages, m => m.Message.Contains("the application completed without reading the entire request body."));
 
             // These would be refused if the cool-down period had expired
             switch (finalFrameType)
@@ -4839,6 +4946,50 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
             await StopConnectionAsync(expectedLastStreamId: 7, ignoreNonGoAwayFrames: true);
         }
 
+        [Fact]
+        public async Task FramesInBatchAreStillProcessedAfterStreamError_WithoutHeartbeat()
+        {
+            // Previously, if there was a stream error, frame processing would stop and wait for either
+            // the heartbeat or more data before continuing frame processing. This is testing that frames
+            // continue to be processed if they were in the same read.
+
+            CreateConnection();
+            _connection.ServerSettings.MaxConcurrentStreams = 1;
+
+            var tcs = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            var headers = new[]
+            {
+                new KeyValuePair<string, string>(HeaderNames.Method, "POST"),
+                new KeyValuePair<string, string>(HeaderNames.Path, "/"),
+                new KeyValuePair<string, string>(HeaderNames.Scheme, "http"),
+            };
+
+            await InitializeConnectionAsync(async context =>
+            {
+                var buffer = new byte[2];
+                var result = await context.Request.BodyReader.ReadAsync().DefaultTimeout();
+                Assert.True(result.IsCompleted);
+                result.Buffer.CopyTo(buffer);
+                context.Request.BodyReader.AdvanceTo(result.Buffer.Start, result.Buffer.End);
+
+                tcs.SetResult(buffer);
+            });
+
+            var streamPayload = new byte[2] { 42, 24 };
+            await StartStreamAsync(1, headers, endStream: false);
+            // Send these 2 frames in a batch with the error in the first frame
+            await StartStreamAsync(3, headers, endStream: false, flushFrame: false);
+            await SendDataAsync(1, streamPayload, endStream: true);
+
+            await WaitForStreamErrorAsync(3, Http2ErrorCode.REFUSED_STREAM, CoreStrings.Http2ErrorMaxStreams);
+
+            var streamResponse = await tcs.Task.DefaultTimeout();
+            Assert.Equal(streamPayload, streamResponse);
+
+            await StopConnectionAsync(expectedLastStreamId: 3, ignoreNonGoAwayFrames: true);
+        }
+
         [Theory]
         [InlineData((int)(Http2FrameType.DATA))]
         [InlineData((int)(Http2FrameType.HEADERS))]
@@ -5070,7 +5221,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
                     new KeyValuePair<string, string>("content-length", "0")
                 };
 
-                foreach (var headerField in requestHeaders.Where(h => h.Key.StartsWith(":")))
+                foreach (var headerField in requestHeaders.Where(h => h.Key.StartsWith(':')))
                 {
                     var headers = requestHeaders.Except(new[] { headerField }).Concat(new[] { headerField });
                     data.Add(headers);

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- Shared testing infrastructure for running E2E tests using selenium -->
-  <Import Project="$(SharedSourceRoot)E2ETesting\E2ETesting.props" />
+  <Import Condition="'$(SkipTestBuild)' != 'true'" Project="$(SharedSourceRoot)E2ETesting\E2ETesting.props" />
 
   <PropertyGroup>
     <TargetFramework>$(DefaultNetCoreTargetFramework)</TargetFramework>
@@ -18,8 +18,6 @@
     <BaseOutputPath />
 
     <OutputPath />
-
-    <GenerateLoggingTestingAssemblyAttributes>false</GenerateLoggingTestingAssemblyAttributes>
 
     <!-- This project references the shared framework transitively. Prevent restore errors by setting this flag. -->
     <GenerateErrorForMissingTargetingPacks>false</GenerateErrorForMissingTargetingPacks>
@@ -41,14 +39,14 @@
     <ProjectReference Include="..\..\WebAssembly\testassets\HostedInAspNet.Client\HostedInAspNet.Client.csproj" />
     <ProjectReference Include="..\..\WebAssembly\testassets\HostedInAspNet.Server\HostedInAspNet.Server.csproj" />
     <ProjectReference Include="..\..\WebAssembly\testassets\StandaloneApp\StandaloneApp.csproj" />
-    <ProjectReference Include="..\..\WebAssembly\DevServer\src\Microsoft.AspNetCore.Components.WebAssembly.DevServer.csproj" />
     <ProjectReference Include="..\testassets\BasicTestApp\BasicTestApp.csproj" />
+    <ProjectReference Include="..\testassets\GlobalizationWasmApp\GlobalizationWasmApp.csproj" />
     <ProjectReference Include="..\testassets\TestServer\Components.TestServer.csproj" />
     <ProjectReference Include="..\..\WebAssembly\testassets\Wasm.Authentication.Server\Wasm.Authentication.Server.csproj" />
   </ItemGroup>
 
   <!-- Shared testing infrastructure for running E2E tests using selenium -->
-  <Import Project="$(SharedSourceRoot)E2ETesting\E2ETesting.targets" />
+  <Import Condition="'$(SkipTestBuild)' != 'true'" Project="$(SharedSourceRoot)E2ETesting\E2ETesting.targets" />
 
   <ItemGroup>
     <!-- Shared descriptor infrastructure with MVC -->
@@ -56,6 +54,8 @@
     <Compile Include="$(RepoRoot)src\Shared\Components\ComponentParameter.cs" />
     <Compile Include="$(RepoRoot)src\Shared\Components\ServerComponentSerializationSettings.cs" />
     <Compile Include="$(RepoRoot)src\Shared\Components\ServerComponentMarker.cs" />
+    <Compile Include="$(RepoRoot)src\Shared\Components\WebAssemblyComponentSerializationSettings.cs" />
+    <Compile Include="$(RepoRoot)src\Shared\Components\WebAssemblyComponentMarker.cs" />
   </ItemGroup>
 
   <ItemGroup>

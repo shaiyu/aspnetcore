@@ -35,9 +35,11 @@ namespace Company.WebApplication1.Controllers
         };
 
         private readonly ILogger<WeatherForecastController> _logger;
+#if (OrganizationalAuth || IndividualB2CAuth)
 
-        // The Web API will only accept tokens 1) for users, and 2) having the access_as_user scope for this API
-        static readonly string[] scopeRequiredByApi = new string[] { "access_as_user" };
+        // The Web API will only accept tokens 1) for users, and 2) having the "api-scope" scope for this API
+        static readonly string[] scopeRequiredByApi = new string[] { "api-scope" };
+#endif
 
 #if (GenerateApi)
         private readonly IDownstreamWebApi _downstreamWebApi;
@@ -54,7 +56,17 @@ namespace Company.WebApplication1.Controllers
         {
             HttpContext.VerifyUserHasAnyAcceptedScope(scopeRequiredByApi);
 
-            string downstreamApiResult = await _downstreamWebApi.CallWebApiAsync();
+            using var response = await _downstreamWebApi.CallWebApiForUserAsync("DownstreamApi").ConfigureAwait(false);
+            if (response.StatusCode == System.Net.HttpStatusCode.OK)
+            {
+                var apiResult = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                // Do something
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                throw new HttpRequestException($"Invalid status code in the HttpResponseMessage: {response.StatusCode}: {error}");
+            }
 
             var rng = new Random();
             return Enumerable.Range(1, 5).Select(index => new WeatherForecast

@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
@@ -15,15 +16,15 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages.Infrastructure
 {
     internal class DynamicPageEndpointMatcherPolicy : MatcherPolicy, IEndpointSelectorPolicy
     {
-        private readonly DynamicPageEndpointSelector _selector;
+        private readonly DynamicPageEndpointSelectorCache _selectorCache;
         private readonly PageLoader _loader;
         private readonly EndpointMetadataComparer _comparer;
 
-        public DynamicPageEndpointMatcherPolicy(DynamicPageEndpointSelector selector, PageLoader loader, EndpointMetadataComparer comparer)
+        public DynamicPageEndpointMatcherPolicy(DynamicPageEndpointSelectorCache selectorCache, PageLoader loader, EndpointMetadataComparer comparer)
         {
-            if (selector == null)
+            if (selectorCache == null)
             {
-                throw new ArgumentNullException(nameof(selector));
+                throw new ArgumentNullException(nameof(selectorCache));
             }
 
             if (loader == null)
@@ -36,7 +37,7 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages.Infrastructure
                 throw new ArgumentNullException(nameof(comparer));
             }
 
-            _selector = selector;
+            _selectorCache = selectorCache;
             _loader = loader;
             _comparer = comparer;
         }
@@ -86,6 +87,8 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages.Infrastructure
                 throw new ArgumentNullException(nameof(candidates));
             }
 
+            DynamicPageEndpointSelector selector = null;
+
             // There's no real benefit here from trying to avoid the async state machine.
             // We only execute on nodes that contain a dynamic policy, and thus always have
             // to await something.
@@ -132,7 +135,8 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages.Infrastructure
                     continue;
                 }
 
-                var endpoints = _selector.SelectEndpoints(dynamicValues);
+                selector = ResolveSelector(selector, endpoint);
+                var endpoints = selector.SelectEndpoints(dynamicValues);
                 if (endpoints.Count == 0 && dynamicPageMetadata != null)
                 {
                     // Having no match for a fallback is a configuration error. We can't really check
@@ -177,24 +181,33 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages.Infrastructure
                 for (var j = 0; j < loadedEndpoints.Count; j++)
                 {
                     var metadata = loadedEndpoints[j].Metadata;
-                    var pageActionDescriptor = metadata.GetMetadata<PageActionDescriptor>();
-
-                    CompiledPageActionDescriptor compiled;
-                    if (_loader is DefaultPageLoader defaultPageLoader)
+                    var actionDescriptor = metadata.GetMetadata<PageActionDescriptor>();
+                    if (actionDescriptor is CompiledPageActionDescriptor)
                     {
-                        compiled = await defaultPageLoader.LoadAsync(pageActionDescriptor, endpoint.Metadata);
+                        // Nothing to do here. The endpoint already represents a compiled page.
                     }
                     else
                     {
-                        compiled = await _loader.LoadAsync(pageActionDescriptor);
+                        // We're working with a runtime-compiled page and have to Load it.
+                        var compiled = actionDescriptor.CompiledPageDescriptor ??
+                            await _loader.LoadAsync(actionDescriptor, endpoint.Metadata);
+                        loadedEndpoints[j] = compiled.Endpoint;
                     }
-
-                    loadedEndpoints[j] = compiled.Endpoint;
                 }
 
                 // Expand the list of endpoints
                 candidates.ExpandEndpoint(i, loadedEndpoints, _comparer);
             }
         }
+
+        private DynamicPageEndpointSelector ResolveSelector(DynamicPageEndpointSelector currentSelector, Endpoint endpoint)
+        {
+            var selector = _selectorCache.GetEndpointSelector(endpoint);
+
+            Debug.Assert(currentSelector == null || ReferenceEquals(currentSelector, selector));
+
+            return selector;
+        }
+
     }
 }

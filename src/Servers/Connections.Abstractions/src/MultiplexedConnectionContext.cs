@@ -6,7 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http.Features;
 
-namespace Microsoft.AspNetCore.Connections
+namespace Microsoft.AspNetCore.Connections.Experimental
 {
     /// <summary>
     /// Encapsulates all information about a multiplexed connection.
@@ -18,7 +18,7 @@ namespace Microsoft.AspNetCore.Connections
         /// </summary>
         /// <param name="cancellationToken"></param>
         /// <returns></returns>
-        public abstract ValueTask<ConnectionContext> AcceptAsync(CancellationToken cancellationToken = default);
+        public abstract ValueTask<ConnectionContext?> AcceptAsync(CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Creates an outbound connection 

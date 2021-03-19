@@ -48,7 +48,7 @@
       "src\\Middleware\\Diagnostics.Abstractions\\src\\Microsoft.AspNetCore.Diagnostics.Abstractions.csproj",
       "src\\Hosting\\Abstractions\\src\\Microsoft.AspNetCore.Hosting.Abstractions.csproj",
       "src\\Hosting\\Server.Abstractions\\src\\Microsoft.AspNetCore.Hosting.Server.Abstractions.csproj",
-      "src\\Html\\Abstractions\\src\\Microsoft.AspNetCore.Html.Abstractions.csproj",
+      "src\\Html.Abstractions\\src\\Microsoft.AspNetCore.Html.Abstractions.csproj",
       "src\\Http\\Http\\src\\Microsoft.AspNetCore.Http.csproj",
       "src\\Http\\Http.Abstractions\\src\\Microsoft.AspNetCore.Http.Abstractions.csproj",
       "src\\Http\\Http.Extensions\\src\\Microsoft.AspNetCore.Http.Extensions.csproj",
@@ -82,7 +82,10 @@
       "src\\Security\\Authentication\\OAuth\\src\\Microsoft.AspNetCore.Authentication.OAuth.csproj",
       "src\\Mvc\\Mvc.NewtonsoftJson\\src\\Microsoft.AspNetCore.Mvc.NewtonsoftJson.csproj",
       "src\\Features\\JsonPatch\\src\\Microsoft.AspNetCore.JsonPatch.csproj",
-      "src\\Mvc\\Mvc.Testing\\src\\Microsoft.AspNetCore.Mvc.Testing.csproj"
+      "src\\Mvc\\Mvc.Testing\\src\\Microsoft.AspNetCore.Mvc.Testing.csproj",
+      "src\\ObjectPool\\src\\Microsoft.Extensions.ObjectPool.csproj",
+      "src\\Http\\Metadata\\src\\Microsoft.AspNetCore.Metadata.csproj",
+      "src\\Localization\\Abstractions\\src\\Microsoft.Extensions.Localization.Abstractions.csproj"
     ]
   }
 }

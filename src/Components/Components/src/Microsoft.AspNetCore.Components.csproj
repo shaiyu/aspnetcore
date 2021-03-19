@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>$(DefaultNetCoreTargetFramework)</TargetFramework>
@@ -6,10 +6,13 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsAspNetCoreApp>true</IsAspNetCoreApp>
     <Nullable>enable</Nullable>
+    <Trimmable>true</Trimmable>
   </PropertyGroup>
 
   <ItemGroup>
     <Compile Include="$(ComponentsSharedSourceRoot)src\ArrayBuilder.cs" LinkBase="RenderTree" />
+    <Compile Include="$(ComponentsSharedSourceRoot)src\JsonSerializerOptionsProvider.cs" />
+    <Compile Include="$(SharedSourceRoot)LinkerFlags.cs" LinkBase="Shared" />
   </ItemGroup>
 
   <ItemGroup>
@@ -17,11 +20,21 @@
     <Reference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
   </ItemGroup>
 
-  <!-- These references were removed in 3.0 -->
+  <!--
+    These references exist only in the .nuspec files and baseline checks are not aware of them. Keep suppressions
+    in sync with the two .nuspec files:
+    - Anytime a reference is added to this project file, remove its suppression.
+    - Remove InNuspecFile attributes of references removed from the .nuspec files. Make suppression conditional on
+      Major.Minor during previews. After RTM (and baseline updates), remove suppressions entirely.
+  -->
   <ItemGroup>
-    <SuppressBaselineReference Include="Microsoft.AspNetCore.Components.Analyzers" />
-    <SuppressBaselineReference Include="Microsoft.AspNetCore.Authorization" />
-    <SuppressBaselineReference Include="System.ComponentModel.Annotations" />
+    <SuppressBaselineReference Include="Microsoft.AspNetCore.Components.Analyzers" InNuspecFile="true" />
+    <SuppressBaselineReference Include="Microsoft.AspNetCore.Authorization" InNuspecFile="true" />
+    <SuppressBaselineReference Include="Microsoft.JSInterop" Condition=" '$(AspNetCoreMajorMinorVersion)' == '6.0' " />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Properties\ILLink.Substitutions.xml" LogicalName="ILLink.Substitutions.xml" />
   </ItemGroup>
 
   <Target Name="_GetNuspecDependencyPackageVersions">
@@ -33,8 +46,8 @@
       <Output TaskParameter="TargetOutputs" ItemName="_ProjectPathWithVersion" />
     </MSBuild>
     <ItemGroup>
-      <NuspecProperty Include="@(_ProjectPathWithVersion->WithMetadataValue('PackageId', 'Microsoft.AspnetCore.Components.Analyzers')->'componentAnalyzerPackageVersion=%(PackageVersion)')" />
-      <NuspecProperty Include="@(_ProjectPathWithVersion->WithMetadataValue('PackageId', 'Microsoft.AspnetCore.Authorization')->'authorizationPackageVersion=%(PackageVersion)')" />
+      <NuspecProperty Include="@(_ProjectPathWithVersion->WithMetadataValue('PackageId', 'Microsoft.AspnetCore.Components.Analyzers')->'componentAnalyzerVersion=%(PackageVersion)')" />
+      <NuspecProperty Include="@(_ProjectPathWithVersion->WithMetadataValue('PackageId', 'Microsoft.AspnetCore.Authorization')->'authorizationVersion=%(PackageVersion)')" />
     </ItemGroup>
   </Target>
 
@@ -45,7 +58,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <NuspecProperty Condition="'$(DotNetBuildFromSource)' != 'true'" Include="systemComponentModelAnnotationsPackageVersion=$(SystemComponentModelAnnotationsPackageVersion)" />
+    <NuspecProperty Condition="'$(DotNetBuildFromSource)' != 'true'" Include="systemComponentModelAnnotationsVersion=$(SystemComponentModelAnnotationsVersion)" />
     <NuspecProperty Include="AssemblyName=$(AssemblyName)" />
     <NuspecProperty Include="DefaultNetCoreTargetFramework=$(DefaultNetCoreTargetFramework)" />
     <NuspecProperty Include="OutputPath=$(OutputPath)" />

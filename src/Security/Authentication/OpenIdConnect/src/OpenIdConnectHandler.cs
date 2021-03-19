@@ -36,10 +36,24 @@ namespace Microsoft.AspNetCore.Authentication.OpenIdConnect
 
         private OpenIdConnectConfiguration _configuration;
 
+        /// <summary>
+        /// Gets the <see cref="HttpClient"/> used to communicate with the remote identity provider.
+        /// </summary>
         protected HttpClient Backchannel => Options.Backchannel;
 
+        /// <summary>
+        /// Gets the <see cref="System.Text.Encodings.Web.HtmlEncoder"/>.
+        /// </summary>
         protected HtmlEncoder HtmlEncoder { get; }
 
+        /// <summary>
+        /// Initializes a new instance of <see cref="OpenIdConnectHandler"/>.
+        /// </summary>
+        /// <param name="options">A monitor to observe changes to <see cref="OpenIdConnectOptions"/>.</param>
+        /// <param name="logger">The <see cref="ILoggerFactory"/>.</param>
+        /// <param name="htmlEncoder">The <see cref="System.Text.Encodings.Web.HtmlEncoder"/>.</param>
+        /// <param name="encoder">The <see cref="UrlEncoder"/>.</param>
+        /// <param name="clock">The <see cref="ISystemClock"/>.</param>
         public OpenIdConnectHandler(IOptionsMonitor<OpenIdConnectOptions> options, ILoggerFactory logger, HtmlEncoder htmlEncoder, UrlEncoder encoder, ISystemClock clock)
             : base(options, logger, encoder, clock)
         {
@@ -56,8 +70,10 @@ namespace Microsoft.AspNetCore.Authentication.OpenIdConnect
             set { base.Events = value; }
         }
 
+        /// <inheritdoc />
         protected override Task<object> CreateEventsAsync() => Task.FromResult<object>(new OpenIdConnectEvents());
 
+        /// <inheritdoc />
         public override Task<bool> HandleRequestAsync()
         {
             if (Options.RemoteSignOutPath.HasValue && Options.RemoteSignOutPath == Request.Path)
@@ -72,6 +88,7 @@ namespace Microsoft.AspNetCore.Authentication.OpenIdConnect
             return base.HandleRequestAsync();
         }
 
+        /// <inheritdoc />
         protected virtual async Task<bool> HandleRemoteSignOutAsync()
         {
             OpenIdConnectMessage message = null;
@@ -88,7 +105,7 @@ namespace Microsoft.AspNetCore.Authentication.OpenIdConnect
               && Request.ContentType.StartsWith("application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase)
               && Request.Body.CanRead)
             {
-                var form = await Request.ReadFormAsync();
+                var form = await Request.ReadFormAsync(Context.RequestAborted);
                 message = new OpenIdConnectMessage(form.Select(pair => new KeyValuePair<string, string[]>(pair.Key, pair.Value)));
             }
 
@@ -178,7 +195,7 @@ namespace Microsoft.AspNetCore.Authentication.OpenIdConnect
                 return;
             }
 
-            properties = properties ?? new AuthenticationProperties();
+            properties ??= new AuthenticationProperties();
 
             Logger.EnteringOpenIdAuthenticationHandlerHandleSignOutAsync(GetType().FullName);
 
@@ -259,7 +276,7 @@ namespace Microsoft.AspNetCore.Authentication.OpenIdConnect
                 Response.Headers[HeaderNames.Pragma] = "no-cache";
                 Response.Headers[HeaderNames.Expires] = HeaderValueEpocDate;
 
-                await Response.Body.WriteAsync(buffer, 0, buffer.Length);
+                await Response.Body.WriteAsync(buffer);
             }
             else
             {
@@ -375,8 +392,7 @@ namespace Microsoft.AspNetCore.Authentication.OpenIdConnect
                 // Store this for use during the code redemption. See RunAuthorizationCodeReceivedEventAsync.
                 properties.Items.Add(OAuthConstants.CodeVerifierKey, codeVerifier);
 
-                using var sha256 = SHA256.Create();
-                var challengeBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(codeVerifier));
+                var challengeBytes = SHA256.HashData(Encoding.UTF8.GetBytes(codeVerifier));
                 var codeChallenge = WebEncoders.Base64UrlEncode(challengeBytes);
 
                 message.Parameters.Add(OAuthConstants.CodeChallengeKey, codeChallenge);
@@ -463,7 +479,7 @@ namespace Microsoft.AspNetCore.Authentication.OpenIdConnect
                 Response.Headers[HeaderNames.Pragma] = "no-cache";
                 Response.Headers[HeaderNames.Expires] = HeaderValueEpocDate;
 
-                await Response.Body.WriteAsync(buffer, 0, buffer.Length);
+                await Response.Body.WriteAsync(buffer);
                 return;
             }
 
@@ -505,7 +521,7 @@ namespace Microsoft.AspNetCore.Authentication.OpenIdConnect
               && Request.ContentType.StartsWith("application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase)
               && Request.Body.CanRead)
             {
-                var form = await Request.ReadFormAsync();
+                var form = await Request.ReadFormAsync(Context.RequestAborted);
                 authorizationResponse = new OpenIdConnectMessage(form.Select(pair => new KeyValuePair<string, string[]>(pair.Key, pair.Value)));
             }
 
@@ -807,7 +823,7 @@ namespace Microsoft.AspNetCore.Authentication.OpenIdConnect
             var requestMessage = new HttpRequestMessage(HttpMethod.Post, tokenEndpointRequest.TokenEndpoint ?? _configuration.TokenEndpoint);
             requestMessage.Content = new FormUrlEncodedContent(tokenEndpointRequest.Parameters);
             requestMessage.Version = Backchannel.DefaultRequestVersion;
-            var responseMessage = await Backchannel.SendAsync(requestMessage);
+            var responseMessage = await Backchannel.SendAsync(requestMessage, Context.RequestAborted);
 
             var contentMediaType = responseMessage.Content.Headers.ContentType?.MediaType;
             if (string.IsNullOrEmpty(contentMediaType))
@@ -826,7 +842,7 @@ namespace Microsoft.AspNetCore.Authentication.OpenIdConnect
             OpenIdConnectMessage message;
             try
             {
-                var responseContent = await responseMessage.Content.ReadAsStringAsync();
+                var responseContent = await responseMessage.Content.ReadAsStringAsync(Context.RequestAborted);
                 message = new OpenIdConnectMessage(responseContent);
             }
             catch (Exception ex)
@@ -870,9 +886,9 @@ namespace Microsoft.AspNetCore.Authentication.OpenIdConnect
             var requestMessage = new HttpRequestMessage(HttpMethod.Get, userInfoEndpoint);
             requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", message.AccessToken);
             requestMessage.Version = Backchannel.DefaultRequestVersion;
-            var responseMessage = await Backchannel.SendAsync(requestMessage);
+            var responseMessage = await Backchannel.SendAsync(requestMessage, Context.RequestAborted);
             responseMessage.EnsureSuccessStatusCode();
-            var userInfoResponse = await responseMessage.Content.ReadAsStringAsync();
+            var userInfoResponse = await responseMessage.Content.ReadAsStringAsync(Context.RequestAborted);
 
             JsonDocument user;
             var contentType = responseMessage.Content.Headers.ContentType;
@@ -999,7 +1015,7 @@ namespace Microsoft.AspNetCore.Authentication.OpenIdConnect
 
             foreach (var nonceKey in Request.Cookies.Keys)
             {
-                if (nonceKey.StartsWith(Options.NonceCookie.Name))
+                if (nonceKey.StartsWith(Options.NonceCookie.Name, StringComparison.Ordinal))
                 {
                     try
                     {
@@ -1019,36 +1035,6 @@ namespace Microsoft.AspNetCore.Authentication.OpenIdConnect
             }
 
             return null;
-        }
-
-        private AuthenticationProperties GetPropertiesFromState(string state)
-        {
-            // assume a well formed query string: <a=b&>OpenIdConnectAuthenticationDefaults.AuthenticationPropertiesKey=kasjd;fljasldkjflksdj<&c=d>
-            var startIndex = 0;
-            if (string.IsNullOrEmpty(state) || (startIndex = state.IndexOf(OpenIdConnectDefaults.AuthenticationPropertiesKey, StringComparison.Ordinal)) == -1)
-            {
-                return null;
-            }
-
-            var authenticationIndex = startIndex + OpenIdConnectDefaults.AuthenticationPropertiesKey.Length;
-            if (authenticationIndex == -1 || authenticationIndex == state.Length || state[authenticationIndex] != '=')
-            {
-                return null;
-            }
-
-            // scan rest of string looking for '&'
-            authenticationIndex++;
-            var endIndex = state.Substring(authenticationIndex, state.Length - authenticationIndex).IndexOf("&", StringComparison.Ordinal);
-
-            // -1 => no other parameters are after the AuthenticationPropertiesKey
-            if (endIndex == -1)
-            {
-                return Options.StateDataFormat.Unprotect(Uri.UnescapeDataString(state.Substring(authenticationIndex).Replace('+', ' ')));
-            }
-            else
-            {
-                return Options.StateDataFormat.Unprotect(Uri.UnescapeDataString(state.Substring(authenticationIndex, endIndex).Replace('+', ' ')));
-            }
         }
 
         private async Task<MessageReceivedContext> RunMessageReceivedEventAsync(OpenIdConnectMessage message, AuthenticationProperties properties)

@@ -4,8 +4,9 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Runtime.CompilerServices;
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.AspNetCore.Components.RenderTree;
+using static Microsoft.AspNetCore.Internal.LinkerFlags;
 
 namespace Microsoft.AspNetCore.Components.Rendering
 {
@@ -23,7 +24,7 @@ namespace Microsoft.AspNetCore.Components.Rendering
         private readonly static object BoxedFalse = false;
         private readonly static string ComponentReferenceCaptureInvalidParentMessage = $"Component reference captures may only be added as children of frames of type {RenderTreeFrameType.Component}";
 
-        private readonly ArrayBuilder<RenderTreeFrame> _entries = new ArrayBuilder<RenderTreeFrame>();
+        private readonly RenderTreeFrameArrayBuilder _entries = new RenderTreeFrameArrayBuilder();
         private readonly Stack<int> _openElementIndices = new Stack<int>();
         private RenderTreeFrameType? _lastNonAttributeFrameType;
         private bool _hasSeenAddMultipleAttributes;
@@ -53,7 +54,8 @@ namespace Microsoft.AspNetCore.Components.Rendering
             }
 
             _openElementIndices.Push(_entries.Count);
-            Append(RenderTreeFrame.Element(sequence, elementName));
+            _entries.AppendElement(sequence, elementName);
+            _lastNonAttributeFrameType = RenderTreeFrameType.Element;
         }
 
         /// <summary>
@@ -71,8 +73,7 @@ namespace Microsoft.AspNetCore.Components.Rendering
                 ProcessDuplicateAttributes(first: indexOfEntryBeingClosed + 1);
             }
 
-            ref var entry = ref _entries.Buffer[indexOfEntryBeingClosed];
-            entry = entry.WithElementSubtreeLength(_entries.Count - indexOfEntryBeingClosed);
+            _entries.Buffer[indexOfEntryBeingClosed].ElementSubtreeLengthField = _entries.Count - indexOfEntryBeingClosed;
         }
 
         /// <summary>
@@ -82,7 +83,8 @@ namespace Microsoft.AspNetCore.Components.Rendering
         /// <param name="markupContent">Content for the new markup frame.</param>
         public void AddMarkupContent(int sequence, string? markupContent)
         {
-            Append(RenderTreeFrame.Markup(sequence, markupContent ?? string.Empty));
+            _entries.AppendMarkup(sequence, markupContent ?? string.Empty);
+            _lastNonAttributeFrameType = RenderTreeFrameType.Markup;
         }
 
         /// <summary>
@@ -92,7 +94,8 @@ namespace Microsoft.AspNetCore.Components.Rendering
         /// <param name="textContent">Content for the new text frame.</param>
         public void AddContent(int sequence, string? textContent)
         {
-            Append(RenderTreeFrame.Text(sequence, textContent ?? string.Empty));
+            _entries.AppendText(sequence, textContent ?? string.Empty);
+            _lastNonAttributeFrameType = RenderTreeFrameType.Text;
         }
 
         /// <summary>
@@ -161,7 +164,8 @@ namespace Microsoft.AspNetCore.Components.Rendering
                 throw new InvalidOperationException($"Valueless attributes may only be added immediately after frames of type {RenderTreeFrameType.Element}");
             }
 
-            Append(RenderTreeFrame.Attribute(sequence, name, BoxedTrue));
+
+            _entries.AppendAttribute(sequence, name, BoxedTrue);
         }
 
         /// <summary>
@@ -181,13 +185,13 @@ namespace Microsoft.AspNetCore.Components.Rendering
             AssertCanAddAttribute();
             if (_lastNonAttributeFrameType == RenderTreeFrameType.Component)
             {
-                Append(RenderTreeFrame.Attribute(sequence, name, value ? BoxedTrue : BoxedFalse));
+                _entries.AppendAttribute(sequence, name, value ? BoxedTrue : BoxedFalse);
             }
             else if (value)
             {
                 // Don't add 'false' attributes for elements. We want booleans to map to the presence
                 // or absence of an attribute, and false => "False" which isn't falsy in js.
-                Append(RenderTreeFrame.Attribute(sequence, name, BoxedTrue));
+                _entries.AppendAttribute(sequence, name, BoxedTrue);
             }
             else
             {
@@ -212,7 +216,7 @@ namespace Microsoft.AspNetCore.Components.Rendering
             AssertCanAddAttribute();
             if (value != null || _lastNonAttributeFrameType == RenderTreeFrameType.Component)
             {
-                Append(RenderTreeFrame.Attribute(sequence, name, value));
+                _entries.AppendAttribute(sequence, name, value);
             }
             else
             {
@@ -237,7 +241,7 @@ namespace Microsoft.AspNetCore.Components.Rendering
             AssertCanAddAttribute();
             if (value != null || _lastNonAttributeFrameType == RenderTreeFrameType.Component)
             {
-                Append(RenderTreeFrame.Attribute(sequence, name, value));
+                _entries.AppendAttribute(sequence, name, value);
             }
             else
             {
@@ -268,19 +272,19 @@ namespace Microsoft.AspNetCore.Components.Rendering
             {
                 // Since this is a component, we need to preserve the type of the EventCallback, so we have
                 // to box.
-                Append(RenderTreeFrame.Attribute(sequence, name, (object)value));
+                _entries.AppendAttribute(sequence, name, value);
             }
             else if (value.RequiresExplicitReceiver)
             {
                 // If we need to preserve the receiver, we just box the EventCallback
                 // so we can get it out on the other side.
-                Append(RenderTreeFrame.Attribute(sequence, name, (object)value));
+                _entries.AppendAttribute(sequence, name, value);
             }
             else if (value.HasDelegate)
             {
                 // In the common case the receiver is also the delegate's target, so we
                 // just need to retain the delegate. This allows us to avoid an allocation.
-                Append(RenderTreeFrame.Attribute(sequence, name, value.Delegate));
+                _entries.AppendAttribute(sequence, name, value.Delegate);
             }
             else
             {
@@ -312,19 +316,19 @@ namespace Microsoft.AspNetCore.Components.Rendering
             {
                 // Since this is a component, we need to preserve the type of the EventCallback, so we have
                 // to box.
-                Append(RenderTreeFrame.Attribute(sequence, name, (object)value));
+                _entries.AppendAttribute(sequence, name, value);
             }
             else if (value.RequiresExplicitReceiver)
             {
                 // If we need to preserve the receiver - we convert this to an untyped EventCallback. We don't
                 // need to preserve the type of an EventCallback<T> when it's invoked from the DOM.
-                Append(RenderTreeFrame.Attribute(sequence, name, (object)value.AsUntyped()));
+                _entries.AppendAttribute(sequence, name, value.AsUntyped());
             }
             else if (value.HasDelegate)
             {
                 // In the common case the receiver is also the delegate's target, so we
                 // just need to retain the delegate. This allows us to avoid an allocation.
-                Append(RenderTreeFrame.Attribute(sequence, name, value.Delegate));
+                _entries.AppendAttribute(sequence, name, value.Delegate);
             }
             else
             {
@@ -357,7 +361,7 @@ namespace Microsoft.AspNetCore.Components.Rendering
                 {
                     if (boolValue)
                     {
-                        Append(RenderTreeFrame.Attribute(sequence, name, BoxedTrue));
+                        _entries.AppendAttribute(sequence, name, BoxedTrue);
                     }
                     else
                     {
@@ -369,7 +373,7 @@ namespace Microsoft.AspNetCore.Components.Rendering
                 {
                     if (callbackValue.HasDelegate)
                     {
-                        Append(RenderTreeFrame.Attribute(sequence, name, callbackValue.UnpackForRenderTree()));
+                        _entries.AppendAttribute(sequence, name, callbackValue.UnpackForRenderTree());
                     }
                     else
                     {
@@ -378,18 +382,18 @@ namespace Microsoft.AspNetCore.Components.Rendering
                 }
                 else if (value is MulticastDelegate)
                 {
-                    Append(RenderTreeFrame.Attribute(sequence, name, value));
+                    _entries.AppendAttribute(sequence, name, value);
                 }
                 else
                 {
                     // The value is either a string, or should be treated as a string.
-                    Append(RenderTreeFrame.Attribute(sequence, name, value.ToString()));
+                    _entries.AppendAttribute(sequence, name, value.ToString());
                 }
             }
             else if (_lastNonAttributeFrameType == RenderTreeFrameType.Component)
             {
                 // If this is a component, we always want to preserve the original type.
-                Append(RenderTreeFrame.Attribute(sequence, name, value));
+                _entries.AppendAttribute(sequence, name, value);
             }
             else
             {
@@ -408,15 +412,16 @@ namespace Microsoft.AspNetCore.Components.Rendering
         /// </summary>
         /// <param name="sequence">An integer that represents the position of the instruction in the source code.</param>
         /// <param name="frame">A <see cref="RenderTreeFrame"/> holding the name and value of the attribute.</param>
-        public void AddAttribute(int sequence, in RenderTreeFrame frame)
+        public void AddAttribute(int sequence, RenderTreeFrame frame)
         {
-            if (frame.FrameType != RenderTreeFrameType.Attribute)
+            if (frame.FrameTypeField != RenderTreeFrameType.Attribute)
             {
                 throw new ArgumentException($"The {nameof(frame.FrameType)} must be {RenderTreeFrameType.Attribute}.");
             }
 
             AssertCanAddAttribute();
-            Append(frame.WithAttributeSequence(sequence));
+            frame.SequenceField = sequence;
+            _entries.Append(frame);
         }
 
         /// <summary>
@@ -464,12 +469,12 @@ namespace Microsoft.AspNetCore.Components.Rendering
             }
 
             ref var prevFrame = ref _entries.Buffer[_entries.Count - 1];
-            if (prevFrame.FrameType != RenderTreeFrameType.Attribute)
+            if (prevFrame.FrameTypeField != RenderTreeFrameType.Attribute)
             {
-                throw new InvalidOperationException($"Incorrect frame type: '{prevFrame.FrameType}'");
+                throw new InvalidOperationException($"Incorrect frame type: '{prevFrame.FrameTypeField}'");
             }
 
-            prevFrame = prevFrame.WithAttributeEventUpdatesAttributeName(updatesAttributeName);
+            prevFrame.AttributeEventUpdatesAttributeNameField = updatesAttributeName;
         }
 
         /// <summary>
@@ -477,7 +482,7 @@ namespace Microsoft.AspNetCore.Components.Rendering
         /// </summary>
         /// <typeparam name="TComponent">The type of the child component.</typeparam>
         /// <param name="sequence">An integer that represents the position of the instruction in the source code.</param>
-        public void OpenComponent<TComponent>(int sequence) where TComponent : notnull, IComponent
+        public void OpenComponent<[DynamicallyAccessedMembers(Component)] TComponent>(int sequence) where TComponent : notnull, IComponent
             => OpenComponentUnchecked(sequence, typeof(TComponent));
 
         /// <summary>
@@ -485,7 +490,7 @@ namespace Microsoft.AspNetCore.Components.Rendering
         /// </summary>
         /// <param name="sequence">An integer that represents the position of the instruction in the source code.</param>
         /// <param name="componentType">The type of the child component.</param>
-        public void OpenComponent(int sequence, Type componentType)
+        public void OpenComponent(int sequence, [DynamicallyAccessedMembers(Component)] Type componentType)
         {
             if (!typeof(IComponent).IsAssignableFrom(componentType))
             {
@@ -516,20 +521,20 @@ namespace Microsoft.AspNetCore.Components.Rendering
 
             var parentFrameIndexValue = parentFrameIndex.Value;
             ref var parentFrame = ref _entries.Buffer[parentFrameIndexValue];
-            switch (parentFrame.FrameType)
+            switch (parentFrame.FrameTypeField)
             {
                 case RenderTreeFrameType.Element:
-                    parentFrame = parentFrame.WithElementKey(value); // It's a ref var, so this writes to the array
+                    parentFrame.ElementKeyField = value; // It's a ref var, so this writes to the array
                     break;
                 case RenderTreeFrameType.Component:
-                    parentFrame = parentFrame.WithComponentKey(value); // It's a ref var, so this writes to the array
+                    parentFrame.ComponentKeyField = value; // It's a ref var, so this writes to the array
                     break;
                 default:
-                    throw new InvalidOperationException($"Cannot set a key on a frame of type {parentFrame.FrameType}.");
+                    throw new InvalidOperationException($"Cannot set a key on a frame of type {parentFrame.FrameTypeField}.");
             }
         }
 
-        private void OpenComponentUnchecked(int sequence, Type componentType)
+        private void OpenComponentUnchecked(int sequence, [DynamicallyAccessedMembers(Component)] Type componentType)
         {
             // We are entering a new scope, since we track the "duplicate attributes" per
             // element/component we might need to clean them up now.
@@ -540,7 +545,8 @@ namespace Microsoft.AspNetCore.Components.Rendering
             }
 
             _openElementIndices.Push(_entries.Count);
-            Append(RenderTreeFrame.ChildComponent(sequence, componentType));
+            _entries.AppendComponent(sequence, componentType);
+            _lastNonAttributeFrameType = RenderTreeFrameType.Component;
         }
 
         /// <summary>
@@ -558,8 +564,7 @@ namespace Microsoft.AspNetCore.Components.Rendering
                 ProcessDuplicateAttributes(first: indexOfEntryBeingClosed + 1);
             }
 
-            ref var entry = ref _entries.Buffer[indexOfEntryBeingClosed];
-            entry = entry.WithComponentSubtreeLength(_entries.Count - indexOfEntryBeingClosed);
+            _entries.Buffer[indexOfEntryBeingClosed].ComponentSubtreeLengthField = _entries.Count - indexOfEntryBeingClosed;
         }
 
         /// <summary>
@@ -574,7 +579,8 @@ namespace Microsoft.AspNetCore.Components.Rendering
                 throw new InvalidOperationException($"Element reference captures may only be added as children of frames of type {RenderTreeFrameType.Element}");
             }
 
-            Append(RenderTreeFrame.ElementReferenceCapture(sequence, elementReferenceCaptureAction));
+            _entries.AppendElementReferenceCapture(sequence, elementReferenceCaptureAction);
+            _lastNonAttributeFrameType = RenderTreeFrameType.ElementReferenceCapture;
         }
 
         /// <summary>
@@ -582,7 +588,7 @@ namespace Microsoft.AspNetCore.Components.Rendering
         /// </summary>
         /// <param name="sequence">An integer that represents the position of the instruction in the source code.</param>
         /// <param name="componentReferenceCaptureAction">An action to be invoked whenever the reference value changes.</param>
-        public void AddComponentReferenceCapture(int sequence, Action<object?> componentReferenceCaptureAction)
+        public void AddComponentReferenceCapture(int sequence, Action<object> componentReferenceCaptureAction)
         {
             var parentFrameIndex = GetCurrentParentFrameIndex();
             if (!parentFrameIndex.HasValue)
@@ -591,12 +597,13 @@ namespace Microsoft.AspNetCore.Components.Rendering
             }
 
             var parentFrameIndexValue = parentFrameIndex.Value;
-            if (_entries.Buffer[parentFrameIndexValue].FrameType != RenderTreeFrameType.Component)
+            if (_entries.Buffer[parentFrameIndexValue].FrameTypeField != RenderTreeFrameType.Component)
             {
                 throw new InvalidOperationException(ComponentReferenceCaptureInvalidParentMessage);
             }
 
-            Append(RenderTreeFrame.ComponentReferenceCapture(sequence, componentReferenceCaptureAction, parentFrameIndexValue));
+            _entries.AppendComponentReferenceCapture(sequence, componentReferenceCaptureAction, parentFrameIndexValue);
+            _lastNonAttributeFrameType = RenderTreeFrameType.ComponentReferenceCapture;
         }
 
         /// <summary>
@@ -614,7 +621,8 @@ namespace Microsoft.AspNetCore.Components.Rendering
             }
 
             _openElementIndices.Push(_entries.Count);
-            Append(RenderTreeFrame.Region(sequence));
+            _entries.AppendRegion(sequence);
+            _lastNonAttributeFrameType = RenderTreeFrameType.Region;
         }
 
         /// <summary>
@@ -624,8 +632,7 @@ namespace Microsoft.AspNetCore.Components.Rendering
         public void CloseRegion()
         {
             var indexOfEntryBeingClosed = _openElementIndices.Pop();
-            ref var entry = ref _entries.Buffer[indexOfEntryBeingClosed];
-            entry = entry.WithRegionSubtreeLength(_entries.Count - indexOfEntryBeingClosed);
+            _entries.Buffer[indexOfEntryBeingClosed].RegionSubtreeLengthField = _entries.Count - indexOfEntryBeingClosed;
         }
 
         private void AssertCanAddAttribute()
@@ -644,7 +651,7 @@ namespace Microsoft.AspNetCore.Components.Rendering
         {
             var parentIndex = GetCurrentParentFrameIndex();
             return parentIndex.HasValue
-                ? _entries.Buffer[parentIndex.Value].FrameType
+                ? _entries.Buffer[parentIndex.Value].FrameTypeField
                 : (RenderTreeFrameType?)null;
         }
 
@@ -662,15 +669,16 @@ namespace Microsoft.AspNetCore.Components.Rendering
 
         // internal because this should only be used during the post-event tree patching logic
         // It's expensive because it involves copying all the subsequent memory in the array
-        internal void InsertAttributeExpensive(int insertAtIndex, int sequence, string attributeName, object? attributeValue)
+        internal bool InsertAttributeExpensive(int insertAtIndex, int sequence, string attributeName, object? attributeValue)
         {
             // Replicate the same attribute omission logic as used elsewhere
             if ((attributeValue == null) || (attributeValue is bool boolValue && !boolValue))
             {
-                return;
+                return false;
             }
 
             _entries.InsertExpensive(insertAtIndex, RenderTreeFrame.Attribute(sequence, attributeName, attributeValue));
+            return true;
         }
 
         /// <summary>
@@ -680,14 +688,14 @@ namespace Microsoft.AspNetCore.Components.Rendering
         public ArrayRange<RenderTreeFrame> GetFrames() =>
             _entries.ToRange();
 
-        private void Append(in RenderTreeFrame frame)
+        internal void AssertTreeIsValid(IComponent component)
         {
-            var frameType = frame.FrameType;
-            _entries.Append(frame);
-
-            if (frameType != RenderTreeFrameType.Attribute)
+            if (_openElementIndices.Count > 0)
             {
-                _lastNonAttributeFrameType = frame.FrameType;
+                // It's never valid to leave an element/component/region unclosed. Doing so
+                // could cause undefined behavior in diffing.
+                ref var invalidFrame = ref _entries.Buffer[_openElementIndices.Peek()];
+                throw new InvalidOperationException($"Render output is invalid for component of type '{component.GetType().FullName}'. A frame of type '{invalidFrame.FrameType}' was left unclosed. Do not use try/catch inside rendering logic, because partial output cannot be undone.");
             }
         }
 
@@ -704,7 +712,7 @@ namespace Microsoft.AspNetCore.Components.Rendering
 
             for (var i = first; i <= last; i++)
             {
-                if (buffer[i].FrameType != RenderTreeFrameType.Attribute)
+                if (buffer[i].FrameTypeField != RenderTreeFrameType.Attribute)
                 {
                     last = i - 1;
                     break;
@@ -712,41 +720,40 @@ namespace Microsoft.AspNetCore.Components.Rendering
             }
 
             // Now that we've found the last attribute, we can iterate backwards and process duplicates.
-            var seenAttributeNames = (_seenAttributeNames ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase));
+            var seenAttributeNames = (_seenAttributeNames ??= new Dictionary<string, int>(SimplifiedStringHashComparer.Instance));
             for (var i = last; i >= first; i--)
             {
                 ref var frame = ref buffer[i];
-                Debug.Assert(frame.FrameType == RenderTreeFrameType.Attribute, $"Frame type is {frame.FrameType} at {i}");
+                Debug.Assert(frame.FrameTypeField == RenderTreeFrameType.Attribute, $"Frame type is {frame.FrameTypeField} at {i}");
 
-                if (!seenAttributeNames.TryGetValue(frame.AttributeName, out var index))
+                if (!seenAttributeNames.TryAdd(frame.AttributeNameField, i))
                 {
-                    // This is the first time seeing this attribute name. Add to the dictionary and move on.
-                    seenAttributeNames.Add(frame.AttributeName, i);
-                }
-                else if (index < i)
-                {
-                    // This attribute is overriding a "silent frame" where we didn't create a frame for an AddAttribute call.
-                    // This is the case for a null event handler, or bool false value.
-                    //
-                    // We need to update our tracking, in case the attribute appeared 3 or more times.
-                    seenAttributeNames[frame.AttributeName] = i;
-                }
-                else if (index > i)
-                {
-                    // This attribute has been overridden. For now, blank out its name to *mark* it. We'll do a pass
-                    // later to wipe it out.
-                    frame = default;
-                }
-                else
-                {
-                    // OK so index == i. How is that possible? Well it's possible for a "silent frame" immediately
-                    // followed by setting the same attribute. Think of it this way, when we create a "silent frame"
-                    // we have to track that attribute name with *some* index.
-                    //
-                    // The only index value we can safely use is _entries.Count (next available). This is fine because
-                    // we never use these indexes to look stuff up, only for comparison.
-                    //
-                    // That gets you here, and there's no action to take.
+                    var index = seenAttributeNames[frame.AttributeNameField];
+                    if (index < i)
+                    {
+                        // This attribute is overriding a "silent frame" where we didn't create a frame for an AddAttribute call.
+                        // This is the case for a null event handler, or bool false value.
+                        //
+                        // We need to update our tracking, in case the attribute appeared 3 or more times.
+                        seenAttributeNames[frame.AttributeNameField] = i;
+                    }
+                    else if (index > i)
+                    {
+                        // This attribute has been overridden. For now, blank out its name to *mark* it. We'll do a pass
+                        // later to wipe it out.
+                        frame = default;
+                    }
+                    else
+                    {
+                        // OK so index == i. How is that possible? Well it's possible for a "silent frame" immediately
+                        // followed by setting the same attribute. Think of it this way, when we create a "silent frame"
+                        // we have to track that attribute name with *some* index.
+                        //
+                        // The only index value we can safely use is _entries.Count (next available). This is fine because
+                        // we never use these indexes to look stuff up, only for comparison.
+                        //
+                        // That gets you here, and there's no action to take.
+                    }
                 }
             }
 
@@ -760,7 +767,7 @@ namespace Microsoft.AspNetCore.Components.Rendering
             for (var i = first; i < _entries.Count; i++)
             {
                 ref var frame = ref buffer[i];
-                if (frame.FrameType != RenderTreeFrameType.None)
+                if (frame.FrameTypeField != RenderTreeFrameType.None)
                 {
                     buffer[offset++] = frame;
                 }
@@ -785,11 +792,12 @@ namespace Microsoft.AspNetCore.Components.Rendering
                 return;
             }
 
-            var seenAttributeNames = (_seenAttributeNames ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase));
+            var seenAttributeNames = (_seenAttributeNames ??= new Dictionary<string, int>(SimplifiedStringHashComparer.Instance));
             seenAttributeNames[name] = _entries.Count; // See comment in ProcessAttributes for why this is OK.
         }
 
-        void IDisposable.Dispose()
+        /// <inheritdoc />
+        public void Dispose()
         {
             _entries.Dispose();
         }

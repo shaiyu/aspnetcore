@@ -3,11 +3,15 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 
 namespace Microsoft.AspNetCore.Authentication
 {
+    /// <summary>
+    /// Options to configure authentication.
+    /// </summary>
     public class AuthenticationOptions
     {
         private readonly IList<AuthenticationSchemeBuilder> _schemes = new List<AuthenticationSchemeBuilder>();
@@ -54,7 +58,7 @@ namespace Microsoft.AspNetCore.Authentication
         /// <typeparam name="THandler">The <see cref="IAuthenticationHandler"/> responsible for the scheme.</typeparam>
         /// <param name="name">The name of the scheme being added.</param>
         /// <param name="displayName">The display name for the scheme.</param>
-        public void AddScheme<THandler>(string name, string displayName) where THandler : IAuthenticationHandler
+        public void AddScheme<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)]THandler>(string name, string? displayName) where THandler : IAuthenticationHandler
             => AddScheme(name, b =>
             {
                 b.DisplayName = displayName;
@@ -92,7 +96,8 @@ namespace Microsoft.AspNetCore.Authentication
         public string? DefaultForbidScheme { get; set; }
 
         /// <summary>
-        /// If true, SignIn should throw if attempted with a ClaimsPrincipal.Identity.IsAuthenticated = false.
+        /// If true, SignIn should throw if attempted with a user is not authenticated.
+        /// A user is considered authenticated if <see cref="ClaimsIdentity.IsAuthenticated"/> returns <see langword="true" /> for the <see cref="ClaimsPrincipal"/> associated with the HTTP request.
         /// </summary>
         public bool RequireAuthenticatedSignIn { get; set; } = true;
     }

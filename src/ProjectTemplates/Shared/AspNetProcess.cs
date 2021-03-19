@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -16,8 +17,7 @@ using Microsoft.AspNetCore.Server.IntegrationTesting;
 using Microsoft.Extensions.CommandLineUtils;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using OpenQA.Selenium;
-using OpenQA.Selenium.Edge;
+using PlaywrightSharp;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -41,6 +41,7 @@ namespace Templates.Test.Helpers
             IDictionary<string, string> environmentVariables,
             bool published,
             bool hasListeningUri = true,
+            bool usePublishedAppHost = false,
             ILogger logger = null)
         {
             _developmentCertificate = DevelopmentCertificate.Create(workingDirectory);
@@ -59,9 +60,29 @@ namespace Templates.Test.Helpers
 
             output.WriteLine("Running ASP.NET Core application...");
 
-            var arguments = published ? $"exec {dllPath}" : "run --no-build";
+            string process;
+            string arguments;
+            if (published)
+            {
+                if (usePublishedAppHost)
+                {
+                    // When publishingu used the app host to run the app. This makes it easy to consistently run for regular and single-file publish
+                    process = Path.ChangeExtension(dllPath, OperatingSystem.IsWindows() ? ".exe" : null);
+                    arguments = null;
+                }
+                else
+                {
+                    process = DotNetMuxer.MuxerPathOrDefault();
+                    arguments = $"exec {dllPath}";
+                }
+            }
+            else
+            {
+                process = DotNetMuxer.MuxerPathOrDefault();
+                arguments = "run --no-build";
+            }
 
-            logger?.LogInformation($"AspNetProcess - process: {DotNetMuxer.MuxerPathOrDefault()} arguments: {arguments}");
+            logger?.LogInformation($"AspNetProcess - process: {process} arguments: {arguments}");
 
             var finalEnvironmentVariables = new Dictionary<string, string>(environmentVariables)
             {
@@ -69,7 +90,7 @@ namespace Templates.Test.Helpers
                 ["ASPNETCORE_Kestrel__Certificates__Default__Password"] = _developmentCertificate.CertificatePassword,
             };
 
-            Process = ProcessEx.Run(output, workingDirectory, DotNetMuxer.MuxerPathOrDefault(), arguments, envVars: finalEnvironmentVariables);
+            Process = ProcessEx.Run(output, workingDirectory, process, arguments, envVars: finalEnvironmentVariables);
 
             logger?.LogInformation("AspNetProcess - process started");
 
@@ -81,34 +102,12 @@ namespace Templates.Test.Helpers
             }
         }
 
-        public void VisitInBrowser(IWebDriver driver)
+        public async Task VisitInBrowserAsync(IPage page)
         {
             _output.WriteLine($"Opening browser at {ListeningUri}...");
-            driver.Navigate().GoToUrl(ListeningUri);
-
-            if (driver is EdgeDriver)
-            {
-                // Workaround for untrusted ASP.NET Core development certificates.
-                // The edge driver doesn't supported skipping the SSL warning page.
-
-                if (driver.Title.Contains("Certificate error", StringComparison.OrdinalIgnoreCase))
-                {
-                    _output.WriteLine("Page contains certificate error. Attempting to get around this...");
-                    driver.FindElement(By.Id("moreInformationDropdownSpan")).Click();
-                    var continueLink = driver.FindElement(By.Id("invalidcert_continue"));
-                    if (continueLink != null)
-                    {
-                        _output.WriteLine($"Clicking on link '{continueLink.Text}' to skip invalid certificate error page.");
-                        continueLink.Click();
-                        driver.Navigate().GoToUrl(ListeningUri);
-                    }
-                    else
-                    {
-                        _output.WriteLine("Could not find link to skip certificate error page.");
-                    }
-                }
-            }
+            await page.GoToAsync(ListeningUri.AbsoluteUri);
         }
+
 
         public async Task AssertPagesOk(IEnumerable<Page> pages)
         {
@@ -152,7 +151,7 @@ namespace Templates.Test.Helpers
                 IHtmlAnchorElement anchor = (IHtmlAnchorElement)link;
                 if (string.Equals(anchor.Protocol, "about:"))
                 {
-                    Assert.True(anchor.PathName.EndsWith(expectedLink), $"Expected next link on {page.Url} to be {expectedLink} but it was {anchor.PathName}.");
+                    Assert.True(anchor.PathName.EndsWith(expectedLink, StringComparison.Ordinal), $"Expected next link on {page.Url} to be {expectedLink} but it was {anchor.PathName}.");
                     await AssertOk(anchor.PathName);
                 }
                 else

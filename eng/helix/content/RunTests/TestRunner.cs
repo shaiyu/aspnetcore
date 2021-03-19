@@ -8,6 +8,9 @@ using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
+#if INSTALLPLAYWRIGHT
+using PlaywrightSharp;
+#endif
 
 namespace RunTests
 {
@@ -26,15 +29,7 @@ namespace RunTests
         {
             try
             {
-                // Rename default.NuGet.config to NuGet.config if there is not a custom one from the project
-                // We use a local NuGet.config file to avoid polluting global machine state and avoid relying on global machine state
-                if (!File.Exists("NuGet.config"))
-                {
-                    File.Copy("default.NuGet.config", "NuGet.config");
-                }
-
                 EnvironmentVariables.Add("PATH", Options.Path);
-                EnvironmentVariables.Add("DOTNET_ROOT", Options.DotnetRoot);
                 EnvironmentVariables.Add("helix", Options.HelixQueue);
 
                 Console.WriteLine($"Current Directory: {Options.HELIX_WORKITEM_ROOT}");
@@ -47,6 +42,18 @@ namespace RunTests
                 var dotnetEFFullPath = Path.Combine(nugetRestore, helixDir, "dotnet-ef.exe");
                 Console.WriteLine($"Set DotNetEfFullPath: {dotnetEFFullPath}");
                 EnvironmentVariables.Add("DotNetEfFullPath", dotnetEFFullPath);
+
+#if INSTALLPLAYWRIGHT
+                // Playwright will download and look for browsers to this directory
+                var playwrightBrowsers = Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH");
+                Console.WriteLine($"Setting PLAYWRIGHT_BROWSERS_PATH: {playwrightBrowsers}");
+                EnvironmentVariables.Add("PLAYWRIGHT_BROWSERS_PATH", playwrightBrowsers);
+                var playrightDriver = Environment.GetEnvironmentVariable("PLAYWRIGHT_DRIVER_PATH");
+                Console.WriteLine($"Setting PLAYWRIGHT_DRIVER_PATH: {playrightDriver}");
+                EnvironmentVariables.Add("PLAYWRIGHT_DRIVER_PATH", playrightDriver);
+#else
+                Console.WriteLine($"Skipping setting PLAYWRIGHT_BROWSERS_PATH");
+#endif
 
                 Console.WriteLine($"Creating nuget restore directory: {nugetRestore}");
                 Directory.CreateDirectory(nugetRestore);
@@ -88,6 +95,24 @@ namespace RunTests
             }
         }
 
+#if INSTALLPLAYWRIGHT
+        public async Task<bool> InstallPlaywrightAsync()
+        {
+            try
+            {
+                Console.WriteLine($"Installing Playwright to Browsers: {Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH")} Driver: {Environment.GetEnvironmentVariable("PLAYWRIGHT_DRIVER_PATH")}");
+                await Playwright.InstallAsync(Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH"), Environment.GetEnvironmentVariable("PLAYWRIGHT_DRIVER_PATH"));
+                DisplayContents(Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH"));
+                return true;
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"Exception installing playwright: {e.ToString()}");
+                return false;
+            }
+        }
+#endif
+
         public async Task<bool> InstallAspNetAppIfNeededAsync()
         {
             try
@@ -99,7 +124,7 @@ namespace RunTests
                     Directory.CreateDirectory(appRuntimePath);
                     Console.WriteLine($"Set ASPNET_RUNTIME_PATH: {appRuntimePath}");
                     EnvironmentVariables.Add("ASPNET_RUNTIME_PATH", appRuntimePath);
-                    Console.WriteLine($"Found AspNetRuntime: {Options.AspNetRuntime}, extracting *.txt,json,dll to {appRuntimePath}");
+                    Console.WriteLine($"Found AspNetRuntime: {Options.AspNetRuntime}, extracting *.txt,json,dll,xml to {appRuntimePath}");
                     using (var archive = ZipFile.OpenRead(Options.AspNetRuntime))
                     {
                         foreach (var entry in archive.Entries)
@@ -107,7 +132,8 @@ namespace RunTests
                             // These are the only extensions that end up in the shared fx directory
                             if (entry.Name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase) ||
                                 entry.Name.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ||
-                                entry.Name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                                entry.Name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ||
+                                entry.Name.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
                             {
                                 entry.ExtractToFile(Path.Combine(appRuntimePath, entry.Name), overwrite: true);
                             }
@@ -120,14 +146,6 @@ namespace RunTests
 
                     await ProcessUtil.RunAsync($"{Options.DotnetRoot}/dotnet",
                         $"nuget add source {Options.HELIX_WORKITEM_ROOT} --configfile NuGet.config",
-                        environmentVariables: EnvironmentVariables,
-                        outputDataReceived: Console.WriteLine,
-                        errorDataReceived: Console.Error.WriteLine,
-                        throwOnError: false,
-                        cancellationToken: new CancellationTokenSource(TimeSpan.FromMinutes(2)).Token);
-
-                    await ProcessUtil.RunAsync($"{Options.DotnetRoot}/dotnet",
-                        "nuget add source https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet5/nuget/v3/index.json --configfile NuGet.config",
                         environmentVariables: EnvironmentVariables,
                         outputDataReceived: Console.WriteLine,
                         errorDataReceived: Console.Error.WriteLine,
@@ -151,8 +169,16 @@ namespace RunTests
                         throwOnError: false,
                         cancellationToken: new CancellationTokenSource(TimeSpan.FromMinutes(2)).Token);
 
+                    await ProcessUtil.RunAsync($"{Options.DotnetRoot}/dotnet",
+                        $"tool install dotnet-serve --tool-path {Options.HELIX_WORKITEM_ROOT}",
+                        environmentVariables: EnvironmentVariables,
+                        outputDataReceived: Console.WriteLine,
+                        errorDataReceived: Console.Error.WriteLine,
+                        throwOnError: false,
+                        cancellationToken: new CancellationTokenSource(TimeSpan.FromMinutes(2)).Token);
+
                     // ';' is the path separator on Windows, and ':' on Unix
-                    Options.Path += RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? ";" : ":";
+                    Options.Path += OperatingSystem.IsWindows() ? ";" : ":";
                     Options.Path += $"{Environment.GetEnvironmentVariable("DOTNET_CLI_HOME")}/.dotnet/tools";
                     EnvironmentVariables["PATH"] = Options.Path;
                 }
@@ -175,9 +201,9 @@ namespace RunTests
             {
                 if (File.Exists(Options.AspNetRef))
                 {
-                    var refPath = $"Microsoft.AspNetCore.App.Ref";
+                    var refPath = $"{Options.DotnetRoot}/packs/Microsoft.AspNetCore.App.Ref/{Options.RuntimeVersion}";
                     Console.WriteLine($"Found AspNetRef: {Options.AspNetRef}, extracting to {refPath}");
-                    ZipFile.ExtractToDirectory(Options.AspNetRef, "Microsoft.AspNetCore.App.Ref");
+                    ZipFile.ExtractToDirectory(Options.AspNetRef, refPath);
 
                     DisplayContents(refPath);
                 }
@@ -199,8 +225,7 @@ namespace RunTests
             try
             {
                 await ProcessUtil.RunAsync($"{Options.DotnetRoot}/dotnet",
-                            $"tool install dotnet-dump --tool-path {Options.HELIX_WORKITEM_ROOT} " +
-                              "--version 5.0.0-* --add-source https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet5/nuget/v3/index.json",
+                            $"tool install dotnet-dump --tool-path {Options.HELIX_WORKITEM_ROOT} --version 5.0.0-*",
                             environmentVariables: EnvironmentVariables,
                             outputDataReceived: Console.WriteLine,
                             errorDataReceived: Console.Error.WriteLine,
@@ -247,7 +272,7 @@ namespace RunTests
             {
                 // Timeout test run 5 minutes before the Helix job would timeout
                 var cts = new CancellationTokenSource(Options.Timeout.Subtract(TimeSpan.FromMinutes(5)));
-                var commonTestArgs = $"test {Options.Target} --logger:xunit --logger:\"console;verbosity=normal\" --blame \"CollectHangDump;TestTimeout=5m\"";                
+                var commonTestArgs = $"test {Options.Target} --logger:xunit --logger:\"console;verbosity=normal\" --blame \"CollectHangDump;TestTimeout=15m\"";
                 if (Options.Quarantined)
                 {
                     Console.WriteLine("Running quarantined tests.");
@@ -322,9 +347,7 @@ namespace RunTests
                     // Combine the directory name + log name for the copied log file name to avoid overwriting duplicate test names in different test projects
                     var logName = $"{Path.GetFileName(Path.GetDirectoryName(file))}_{Path.GetFileName(file)}";
                     Console.WriteLine($"Copying: {file} to {Path.Combine(HELIX_WORKITEM_UPLOAD_ROOT, logName)}");
-                    // Need to copy to HELIX_WORKITEM_UPLOAD_ROOT and HELIX_WORKITEM_UPLOAD_ROOT/../ in order for Azure Devops attachments to link properly and for Helix to store the logs
                     File.Copy(file, Path.Combine(HELIX_WORKITEM_UPLOAD_ROOT, logName));
-                    File.Copy(file, Path.Combine(HELIX_WORKITEM_UPLOAD_ROOT, "..", logName));
                 }
             }
             else
@@ -338,15 +361,13 @@ namespace RunTests
                 {
                     var fileName = Path.GetFileName(file);
                     Console.WriteLine($"Copying: {file} to {Path.Combine(HELIX_WORKITEM_UPLOAD_ROOT, fileName)}");
-                    // Need to copy to HELIX_WORKITEM_UPLOAD_ROOT and HELIX_WORKITEM_UPLOAD_ROOT/../ in order for Azure Devops attachments to link properly and for Helix to store the logs
                     File.Copy(file, Path.Combine(HELIX_WORKITEM_UPLOAD_ROOT, fileName));
-                    File.Copy(file, Path.Combine(HELIX_WORKITEM_UPLOAD_ROOT, "..", fileName));
                 }
             }
             else
             {
                 Console.WriteLine("No dmps found in TestResults");
-            }            
+            }
         }
     }
 }

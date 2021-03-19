@@ -27,6 +27,10 @@ namespace Microsoft.AspNetCore.Builder
         /// </summary>
         public CookieSecurePolicy Secure { get; set; } = CookieSecurePolicy.None;
 
+        /// <summary>
+        /// Gets or sets the <see cref="CookieBuilder"/> that is used to track if the user consented to the
+        /// cookie use policy.
+        /// </summary>
         public CookieBuilder ConsentCookie { get; set; } = new CookieBuilder()
         {
             Name = ".AspNet.Consent",
@@ -37,16 +41,16 @@ namespace Microsoft.AspNetCore.Builder
         /// <summary>
         /// Checks if consent policies should be evaluated on this request. The default is false.
         /// </summary>
-        public Func<HttpContext, bool> CheckConsentNeeded { get; set; }
+        public Func<HttpContext, bool>? CheckConsentNeeded { get; set; }
 
         /// <summary>
         /// Called when a cookie is appended.
         /// </summary>
-        public Action<AppendCookieContext> OnAppendCookie { get; set; }
+        public Action<AppendCookieContext>? OnAppendCookie { get; set; }
 
         /// <summary>
         /// Called when a cookie is deleted.
         /// </summary>
-        public Action<DeleteCookieContext> OnDeleteCookie { get; set; }
+        public Action<DeleteCookieContext>? OnDeleteCookie { get; set; }
     }
 }

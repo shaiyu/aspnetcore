@@ -8,16 +8,16 @@ import { AbortError, DefaultHttpClient, HttpClient, HttpRequest, HttpResponse, H
 import { MessagePackHubProtocol } from "@microsoft/signalr-protocol-msgpack";
 import { getUserAgentHeader, Platform } from "@microsoft/signalr/dist/esm/Utils";
 
-import { DEFAULT_TIMEOUT_INTERVAL, eachTransport, eachTransportAndProtocolAndHttpClient, ENDPOINT_BASE_HTTPS_URL, ENDPOINT_BASE_URL } from "./Common";
+import { DEFAULT_TIMEOUT_INTERVAL, eachTransport, eachTransportAndProtocolAndHttpClient, ENDPOINT_BASE_HTTPS_URL, ENDPOINT_BASE_URL, shouldRunHttpsTests } from "./Common";
 import "./LogBannerReporter";
 import { TestLogger } from "./TestLogger";
 
-import { PromiseSource } from "../../signalr/tests/Utils";
-
 import * as RX from "rxjs";
+import { PromiseSource } from "./Utils";
 
 const TESTHUBENDPOINT_URL = ENDPOINT_BASE_URL + "/testhub";
 const TESTHUBENDPOINT_HTTPS_URL = ENDPOINT_BASE_HTTPS_URL ? (ENDPOINT_BASE_HTTPS_URL + "/testhub") : undefined;
+const HTTPORHTTPS_TESTHUBENDPOINT_URL = shouldRunHttpsTests ? TESTHUBENDPOINT_HTTPS_URL : TESTHUBENDPOINT_URL;
 
 const TESTHUB_NOWEBSOCKETS_ENDPOINT_URL = ENDPOINT_BASE_URL + "/testhub-nowebsockets";
 const TESTHUB_REDIRECT_ENDPOINT_URL = ENDPOINT_BASE_URL + "/redirect?numRedirects=0&baseUrl=" + ENDPOINT_BASE_URL;
@@ -27,17 +27,6 @@ jasmine.DEFAULT_TIMEOUT_INTERVAL = DEFAULT_TIMEOUT_INTERVAL;
 const commonOptions: IHttpConnectionOptions = {
     logMessageContent: true,
 };
-
-// Run test in Node or Chrome, but not on macOS
-const shouldRunHttpsTests =
-    // Need to have an HTTPS URL
-    !!TESTHUBENDPOINT_HTTPS_URL &&
-
-    // Run on Node, unless macOS
-    (process && process.platform !== "darwin") &&
-
-    // Only run under Chrome browser
-    (typeof navigator === "undefined" || navigator.userAgent.search("Chrome") !== -1);
 
 function getConnectionBuilder(transportType?: HttpTransportType, url?: string, options?: IHttpConnectionOptions): HubConnectionBuilder {
     let actualOptions: IHttpConnectionOptions = options || {};
@@ -406,11 +395,6 @@ describe("hubConnection", () => {
 
                 await hubConnection.start();
                 const value = await hubConnection.invoke("EchoComplexObject", complexObject);
-                if (protocol.name === "messagepack") {
-                    // msgpack5 creates a Buffer for byte arrays and jasmine fails to compare a Buffer
-                    // and a Uint8Array even though Buffer instances are also Uint8Array instances
-                    value.ByteArray = new Uint8Array(value.ByteArray);
-                }
                 expect(value).toEqual(complexObject);
 
                 await hubConnection.stop();
@@ -440,11 +424,6 @@ describe("hubConnection", () => {
 
                 await hubConnection.start();
                 const value = await hubConnection.invoke("SendComplexObject");
-                if (protocol.name === "messagepack") {
-                    // msgpack5 creates a Buffer for byte arrays and jasmine fails to compare a Buffer
-                    // and a Uint8Array even though Buffer instances are also Uint8Array instances
-                    value.ByteArray = new Uint8Array(value.ByteArray);
-                }
                 expect(value).toEqual(complexObject);
 
                 await hubConnection.stop();
@@ -599,7 +578,7 @@ describe("hubConnection", () => {
             }
 
             it("preserves cookies between requests", async (done) => {
-                const hubConnection = getConnectionBuilder(transportType).build();
+                const hubConnection = getConnectionBuilder(transportType, HTTPORHTTPS_TESTHUBENDPOINT_URL).build();
                 await hubConnection.start();
                 const cookieValue = await hubConnection.invoke<string>("GetCookie", "testCookie");
                 const cookieValue2 = await hubConnection.invoke<string>("GetCookie", "testCookie2");
@@ -610,7 +589,7 @@ describe("hubConnection", () => {
             });
 
             it("expired cookies are not preserved", async (done) => {
-                const hubConnection = getConnectionBuilder(transportType).build();
+                const hubConnection = getConnectionBuilder(transportType, HTTPORHTTPS_TESTHUBENDPOINT_URL).build();
                 await hubConnection.start();
                 const cookieValue = await hubConnection.invoke<string>("GetCookie", "expiredCookie");
                 expect(cookieValue).toBeNull();

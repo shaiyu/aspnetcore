@@ -121,6 +121,76 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
         }
 
         [Fact]
+        public async Task PING_WithinKeepAliveTimeout_ResetKeepAliveTimeout()
+        {
+            var mockSystemClock = _serviceContext.MockSystemClock;
+            var limits = _serviceContext.ServerOptions.Limits;
+
+            _timeoutControl.Initialize(mockSystemClock.UtcNow.Ticks);
+
+            CreateConnection();
+
+            await InitializeConnectionAsync(_noopApplication);
+
+            // Connection starts and sets keep alive timeout
+            _mockTimeoutControl.Verify(c => c.SetTimeout(It.IsAny<long>(), TimeoutReason.KeepAlive), Times.Once);
+            _mockTimeoutControl.Verify(c => c.ResetTimeout(It.IsAny<long>(), TimeoutReason.KeepAlive), Times.Never);
+
+            await SendPingAsync(Http2PingFrameFlags.NONE);
+            await ExpectAsync(Http2FrameType.PING,
+                withLength: 8,
+                withFlags: (byte)Http2PingFrameFlags.ACK,
+                withStreamId: 0);
+
+            // Server resets keep alive timeout
+            _mockTimeoutControl.Verify(c => c.ResetTimeout(It.IsAny<long>(), TimeoutReason.KeepAlive), Times.Once);
+        }
+
+        [Fact]
+        public async Task PING_NoKeepAliveTimeout_DoesNotResetKeepAliveTimeout()
+        {
+            var mockSystemClock = _serviceContext.MockSystemClock;
+            var limits = _serviceContext.ServerOptions.Limits;
+
+            _timeoutControl.Initialize(mockSystemClock.UtcNow.Ticks);
+
+            CreateConnection();
+
+            await InitializeConnectionAsync(_echoApplication);
+
+            // Connection starts and sets keep alive timeout
+            _mockTimeoutControl.Verify(c => c.SetTimeout(It.IsAny<long>(), TimeoutReason.KeepAlive), Times.Once);
+            _mockTimeoutControl.Verify(c => c.ResetTimeout(It.IsAny<long>(), TimeoutReason.KeepAlive), Times.Never);
+            _mockTimeoutControl.Verify(c => c.CancelTimeout(), Times.Never);
+
+            // Stream will stay open because it is waiting for request body to end
+            await StartStreamAsync(1, _browserRequestHeaders, endStream: false);
+
+            // Starting a stream cancels the keep alive timeout
+            _mockTimeoutControl.Verify(c => c.CancelTimeout(), Times.Once);
+
+            await SendPingAsync(Http2PingFrameFlags.NONE);
+            await ExpectAsync(Http2FrameType.PING,
+                withLength: 8,
+                withFlags: (byte)Http2PingFrameFlags.ACK,
+                withStreamId: 0);
+
+            // Server doesn't reset keep alive timeout because it isn't running
+            _mockTimeoutControl.Verify(c => c.ResetTimeout(It.IsAny<long>(), TimeoutReason.KeepAlive), Times.Never);
+
+            // End stream
+            await SendDataAsync(1, _helloWorldBytes, endStream: true);
+            await ExpectAsync(Http2FrameType.HEADERS,
+                withLength: 32,
+                withFlags: (byte)Http2HeadersFrameFlags.END_HEADERS,
+                withStreamId: 1);
+            await ExpectAsync(Http2FrameType.DATA,
+                withLength: _helloWorldBytes.Length,
+                withFlags: (byte)Http2DataFrameFlags.NONE,
+                withStreamId: 1);
+        }
+
+        [Fact]
         public async Task HEADERS_ReceivedWithoutAllCONTINUATIONs_WithinRequestHeadersTimeout_AbortsConnection()
         {
             var mockSystemClock = _serviceContext.MockSystemClock;
@@ -263,7 +333,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
         }
 
         [Fact]
-        [QuarantinedTest("https://github.com/dotnet/aspnetcore-internal/issues/1323")]
+        [QuarantinedTest("https://github.com/dotnet/aspnetcore/issues/21520")]
         public async Task DATA_Sent_TooSlowlyDueToSocketBackPressureOnSmallWrite_AbortsConnectionAfterGracePeriod()
         {
             var mockSystemClock = _serviceContext.MockSystemClock;
@@ -316,7 +386,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
         }
 
         [Fact]
-        [QuarantinedTest]
+        [QuarantinedTest("https://github.com/dotnet/aspnetcore/issues/21520")]
         public async Task DATA_Sent_TooSlowlyDueToSocketBackPressureOnLargeWrite_AbortsConnectionAfterRateTimeout()
         {
             var mockSystemClock = _serviceContext.MockSystemClock;
@@ -480,7 +550,8 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
             _mockConnectionContext.VerifyNoOtherCalls();
         }
 
-        [Fact(Skip = "https://github.com/dotnet/aspnetcore-internal/issues/2197")]
+        [Fact]
+        [QuarantinedTest("https://github.com/dotnet/aspnetcore-internal/issues/2197")]
         public async Task DATA_Sent_TooSlowlyDueToOutputFlowControlOnMultipleStreams_AbortsConnectionAfterAdditiveRateTimeout()
         {
             var mockSystemClock = _serviceContext.MockSystemClock;
@@ -512,7 +583,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
             await SendDataAsync(3, _maxData, endStream: true);
 
             await ExpectAsync(Http2FrameType.HEADERS,
-                withLength: 32,
+                withLength: 2,
                 withFlags: (byte)Http2HeadersFrameFlags.END_HEADERS,
                 withStreamId: 3);
             await ExpectAsync(Http2FrameType.DATA,

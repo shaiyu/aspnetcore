@@ -6,7 +6,7 @@
 .PARAMETER Project
     The test project to publish and send to Helix.
 .PARAMETER HelixQueues
-    Set the Helix queues to use, the list is ';' separated.
+    Set the Helix queues to use. The list is '+' or ';'-separated.
     Some supported queues:
     Ubuntu.1604.Amd64.Open
     Ubuntu.1804.Amd64.Open
@@ -37,5 +37,10 @@ $env:BUILD_SOURCEBRANCH="local"
 $env:BUILD_REPOSITORY_NAME="aspnetcore"
 $env:SYSTEM_TEAMPROJECT="aspnetcore"
 
+Write-Host -ForegroundColor Yellow "If running tests that need the shared Fx, run './build -pack -all' before this."
+Write-Host -ForegroundColor Yellow "And if packing for a different platform, add '/p:CrossgenOutput=false'."
+
 $HelixQueues = $HelixQueues -replace ";", "%3B"
-dotnet msbuild $Project /t:Helix /p:TargetArchitecture="$TargetArchitecture" /p:IsRequiredCheck=true /p:IsHelixDaily=true /p:HelixTargetQueues=$HelixQueues /p:RunQuarantinedTests=$RunQuarantinedTests /p:_UseHelixOpenQueues=true /p:ASPNETCORE_TEST_LOG_DIR=artifacts/log
+dotnet msbuild $Project /t:Helix /p:TargetArchitecture="$TargetArchitecture" /p:IsRequiredCheck=true `
+    /p:IsHelixDaily=true /p:HelixTargetQueues=$HelixQueues /p:RunQuarantinedTests=$RunQuarantinedTests `
+    /p:_UseHelixOpenQueues=true /p:CrossgenOutput=false /p:ASPNETCORE_TEST_LOG_DIR=artifacts/log

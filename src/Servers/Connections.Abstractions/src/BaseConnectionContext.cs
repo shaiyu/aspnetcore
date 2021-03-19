@@ -10,12 +10,15 @@ using Microsoft.AspNetCore.Http.Features;
 
 namespace Microsoft.AspNetCore.Connections
 {
+    /// <summary>
+    /// Represents the context for a connection.
+    /// </summary>
     public abstract class BaseConnectionContext : IAsyncDisposable
     {
         /// <summary>
         /// Gets or sets a unique identifier to represent this connection in trace logs.
         /// </summary>
-        public abstract string? ConnectionId { get; set; }
+        public abstract string ConnectionId { get; set; }
 
         /// <summary>
         /// Gets the collection of features provided by the server and middleware available on this connection.
@@ -25,7 +28,7 @@ namespace Microsoft.AspNetCore.Connections
         /// <summary>
         /// Gets or sets a key/value collection that can be used to share data within the scope of this connection.
         /// </summary>
-        public abstract IDictionary<object, object?>? Items { get; set; }
+        public abstract IDictionary<object, object?> Items { get; set; }
 
         /// <summary>
         /// Triggered when the client connection is closed.

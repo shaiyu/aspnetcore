@@ -131,7 +131,6 @@ namespace Microsoft.AspNetCore.Server.HttpSys
         }
 
         [ConditionalFact]
-        [QuarantinedTest("https://github.com/dotnet/aspnetcore-internal/issues/2267")]
         public async Task Server_ShutdownDuringRequest_Success()
         {
             Task<string> responseTask;
@@ -320,7 +319,7 @@ namespace Microsoft.AspNetCore.Server.HttpSys
                 using (var client = await SendHungRequestAsync("GET", address))
                 {
                     await received.Task.TimeoutAfter(interval);
-                    Assert.Throws<IOException>(() => client.GetStream().Read(new byte[10], 0, 10));
+                    Assert.ThrowsAny<IOException>(() => client.GetStream().Read(new byte[10], 0, 10));
                 }
             }
         }

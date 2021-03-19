@@ -148,7 +148,7 @@ namespace Microsoft.AspNetCore.Authentication.WsFederation
               && Request.ContentType.StartsWith("application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase)
               && Request.Body.CanRead)
             {
-                var form = await Request.ReadFormAsync();
+                var form = await Request.ReadFormAsync(Context.RequestAborted);
 
                 wsFederationMessage = new WsFederationMessage(form.Select(pair => new KeyValuePair<string, string[]>(pair.Key, pair.Value)));
             }
@@ -295,7 +295,7 @@ namespace Microsoft.AspNetCore.Authentication.WsFederation
                 Logger.ExceptionProcessingMessage(exception);
 
                 // Refresh the configuration for exceptions that may be caused by key rollovers. The user can also request a refresh in the notification.
-                if (Options.RefreshOnIssuerKeyNotFound && exception.GetType().Equals(typeof(SecurityTokenSignatureKeyNotFoundException)))
+                if (Options.RefreshOnIssuerKeyNotFound && exception is SecurityTokenSignatureKeyNotFoundException)
                 {
                     Options.ConfigurationManager.RequestRefresh();
                 }

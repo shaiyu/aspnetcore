@@ -11,7 +11,7 @@ namespace Microsoft.AspNetCore.Internal
     internal sealed class ReusableUtf8JsonWriter
     {
         [ThreadStatic]
-        private static ReusableUtf8JsonWriter _cachedInstance;
+        private static ReusableUtf8JsonWriter? _cachedInstance;
 
         private readonly Utf8JsonWriter _writer;
 

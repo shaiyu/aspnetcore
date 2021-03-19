@@ -5,6 +5,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Linq;
 using System.Runtime.ExceptionServices;
 using System.Threading;
@@ -224,7 +225,7 @@ namespace Microsoft.AspNetCore.Components.Test
                     {
                         Assert.Equal(RenderTreeEditType.StepOut, edit.Type);
                     });
-                AssertFrame.Text(update.ReferenceFrames[0], (5 - i).ToString());
+                AssertFrame.Text(update.ReferenceFrames[0], (5 - i).ToString(CultureInfo.InvariantCulture));
             }
         }
 
@@ -481,6 +482,98 @@ namespace Microsoft.AspNetCore.Components.Test
             var renderTask = renderer.DispatchEventAsync(eventHandlerId, eventArgs);
             Assert.True(renderTask.IsCompletedSuccessfully);
             Assert.Same(eventArgs, receivedArgs);
+        }
+
+        [Fact]
+        public void CanGetEventArgsTypeForHandler()
+        {
+            // Arrange: Render a component with an event handler
+            var renderer = new TestRenderer();
+
+            var component = new EventComponent
+            {
+                OnArbitraryDelegateEvent = (Func<DerivedEventArgs, Task>)(args => Task.CompletedTask),
+            };
+            var componentId = renderer.AssignRootComponentId(component);
+            component.TriggerRender();
+
+            var eventHandlerId = renderer.Batches.Single()
+                .ReferenceFrames
+                .First(frame => frame.AttributeValue != null)
+                .AttributeEventHandlerId;
+
+            // Assert: Can determine event args type
+            var eventArgsType = renderer.GetEventArgsType(eventHandlerId);
+            Assert.Same(typeof(DerivedEventArgs), eventArgsType);
+        }
+
+        [Fact]
+        public void CanGetEventArgsTypeForParameterlessHandler()
+        {
+            // Arrange: Render a component with an event handler
+            var renderer = new TestRenderer();
+
+            var component = new EventComponent
+            {
+                OnArbitraryDelegateEvent = (Func<Task>)(() => Task.CompletedTask),
+            };
+            var componentId = renderer.AssignRootComponentId(component);
+            component.TriggerRender();
+
+            var eventHandlerId = renderer.Batches.Single()
+                .ReferenceFrames
+                .First(frame => frame.AttributeValue != null)
+                .AttributeEventHandlerId;
+
+            // Assert: Can determine event args type
+            var eventArgsType = renderer.GetEventArgsType(eventHandlerId);
+            Assert.Same(typeof(EventArgs), eventArgsType);
+        }
+
+        [Fact]
+        public void CannotGetEventArgsTypeForMultiParameterHandler()
+        {
+            // Arrange: Render a component with an event handler
+            var renderer = new TestRenderer();
+
+            var component = new EventComponent
+            {
+                OnArbitraryDelegateEvent = (Action<EventArgs, string>)((x, y) => { }),
+            };
+            var componentId = renderer.AssignRootComponentId(component);
+            component.TriggerRender();
+
+            var eventHandlerId = renderer.Batches.Single()
+                .ReferenceFrames
+                .First(frame => frame.AttributeValue != null)
+                .AttributeEventHandlerId;
+
+            // Assert: Cannot determine event args type
+            var ex = Assert.Throws<InvalidOperationException>(() => renderer.GetEventArgsType(eventHandlerId));
+            Assert.Contains("declares more than one parameter", ex.Message);
+        }
+
+        [Fact]
+        public void CannotGetEventArgsTypeForHandlerWithNonEventArgsParameter()
+        {
+            // Arrange: Render a component with an event handler
+            var renderer = new TestRenderer();
+
+            var component = new EventComponent
+            {
+                OnArbitraryDelegateEvent = (Action<DateTime>)(arg => { }),
+            };
+            var componentId = renderer.AssignRootComponentId(component);
+            component.TriggerRender();
+
+            var eventHandlerId = renderer.Batches.Single()
+                .ReferenceFrames
+                .First(frame => frame.AttributeValue != null)
+                .AttributeEventHandlerId;
+
+            // Assert: Cannot determine event args type
+            var ex = Assert.Throws<InvalidOperationException>(() => renderer.GetEventArgsType(eventHandlerId));
+            Assert.Contains($"must inherit from {typeof(EventArgs).FullName}", ex.Message);
         }
 
         [Fact]
@@ -3813,6 +3906,66 @@ namespace Microsoft.AspNetCore.Components.Test
             Assert.Contains(exception2, aex.InnerExceptions);
         }
 
+        [Fact]
+        public async Task DisposingRenderer_CapturesSyncExceptionsFromAllRegisteredAsyncDisposableComponents()
+        {
+            // Arrange
+            var renderer = new TestRenderer { ShouldHandleExceptions = true };
+            var exception1 = new InvalidOperationException();
+            var disposed = false;
+
+            var component = new TestComponent(builder =>
+            {
+                builder.AddContent(0, "Hello");
+                builder.OpenComponent<AsyncDisposableComponent>(1);
+                builder.AddAttribute(1, nameof(AsyncDisposableComponent.AsyncDisposeAction), (Func<ValueTask>)(() => { disposed = true; throw exception1; }));
+                builder.CloseComponent();
+            });
+            var componentId = renderer.AssignRootComponentId(component);
+            component.TriggerRender();
+
+            // Act
+            await renderer.DisposeAsync();
+
+            // Assert
+            Assert.True(disposed);
+            var handledException = Assert.Single(renderer.HandledExceptions);
+            Assert.Same(exception1, handledException);
+        }
+
+        [Fact]
+        public async Task DisposingRenderer_CapturesAsyncExceptionsFromAllRegisteredAsyncDisposableComponents()
+        {
+            // Arrange
+            var renderer = new TestRenderer { ShouldHandleExceptions = true };
+            var exception1 = new InvalidOperationException();
+            var disposed = false;
+            var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            var component = new TestComponent(builder =>
+            {
+                builder.AddContent(0, "Hello");
+                builder.OpenComponent<AsyncDisposableComponent>(1);
+                builder.AddAttribute(1, nameof(AsyncDisposableComponent.AsyncDisposeAction), (Func<ValueTask>)(async () => { await tcs.Task; disposed = true; throw exception1; }));
+                builder.CloseComponent();
+            });
+            var componentId = renderer.AssignRootComponentId(component);
+            component.TriggerRender();
+
+            // Act
+            var disposal = renderer.DisposeAsync();
+            Assert.False(disposed);
+            Assert.False(disposal.IsCompleted);
+
+            tcs.TrySetResult();
+            await disposal;
+
+            // Assert
+            Assert.True(disposed);
+            var handledException = Assert.Single(renderer.HandledExceptions);
+            Assert.Same(exception1, handledException);
+        }
+
         [Theory]
         [InlineData(null)] // No existing attribute to update
         [InlineData("old property value")] // Has existing attribute to update
@@ -4001,6 +4154,22 @@ namespace Microsoft.AspNetCore.Components.Test
                 requestedType => Assert.Equal(typeof(TestComponent), requestedType));
         }
 
+        [Fact]
+        public async Task ThrowsIfComponentProducesInvalidRenderTree()
+        {
+            // Arrange
+            var renderer = new TestRenderer();
+            var component = new TestComponent(builder =>
+            {
+                builder.OpenElement(0, "myElem");
+            });
+            var rootComponentId = renderer.AssignRootComponentId(component);
+
+            // Act/Assert
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => renderer.RenderRootComponentAsync(rootComponentId));
+            Assert.StartsWith($"Render output is invalid for component of type '{typeof(TestComponent).FullName}'. A frame of type 'Element' was left unclosed.", ex.Message);
+        }
+
         private class TestComponentActivator<TResult> : IComponentActivator where TResult : IComponent, new()
         {
             public List<Type> RequestedComponentTypes { get; } = new List<Type>();
@@ -4147,6 +4316,9 @@ namespace Microsoft.AspNetCore.Components.Test
             [Parameter]
             public EventCallback<DerivedEventArgs> OnClickEventCallbackOfT { get; set; }
 
+            [Parameter]
+            public Delegate OnArbitraryDelegateEvent { get; set; }
+
             public bool SkipElement { get; set; }
             private int renderCount = 0;
 
@@ -4192,6 +4364,12 @@ namespace Microsoft.AspNetCore.Components.Test
                     {
                         builder.AddAttribute(5, "onclickaction", OnClickAsyncAction);
                     }
+
+                    if (OnArbitraryDelegateEvent != null)
+                    {
+                        builder.AddAttribute(6, "onarbitrarydelegateevent", OnArbitraryDelegateEvent);
+                    }
+
                     builder.CloseElement();
                     builder.CloseElement();
                 }

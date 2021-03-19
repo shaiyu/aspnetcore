@@ -3,8 +3,14 @@
 
 namespace Microsoft.AspNetCore.Connections.Features
 {
+    /// <summary>
+    /// The unique identifier for a given connection.
+    /// </summary>
     public interface IConnectionIdFeature
     {
-        string? ConnectionId { get; set; }
+        /// <summary>
+        /// Gets or sets the connection identifier.
+        /// </summary>
+        string ConnectionId { get; set; }
     }
 }

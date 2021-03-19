@@ -14,6 +14,10 @@ namespace Microsoft.AspNetCore.Authentication.Cookies
     {
         private readonly IDataProtectionProvider _dp;
 
+        /// <summary>
+        /// Initializes a new instance of <see cref="PostConfigureCookieAuthenticationOptions"/>.
+        /// </summary>
+        /// <param name="dataProtection">The <see cref="IDataProtectionProvider"/>.</param>
         public PostConfigureCookieAuthenticationOptions(IDataProtectionProvider dataProtection)
         {
             _dp = dataProtection;
@@ -30,7 +34,7 @@ namespace Microsoft.AspNetCore.Authentication.Cookies
 
             if (string.IsNullOrEmpty(options.Cookie.Name))
             {
-                options.Cookie.Name = CookieAuthenticationDefaults.CookiePrefix + name;
+                options.Cookie.Name = CookieAuthenticationDefaults.CookiePrefix + Uri.EscapeDataString(name);
             }
             if (options.TicketDataFormat == null)
             {

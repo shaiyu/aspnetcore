@@ -1,8 +1,11 @@
 // Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
+#nullable enable
+
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
@@ -15,14 +18,14 @@ namespace Microsoft.AspNetCore.Mvc.Routing
 {
     internal class DynamicControllerEndpointMatcherPolicy : MatcherPolicy, IEndpointSelectorPolicy
     {
-        private readonly DynamicControllerEndpointSelector _selector;
+        private readonly DynamicControllerEndpointSelectorCache _selectorCache;
         private readonly EndpointMetadataComparer _comparer;
 
-        public DynamicControllerEndpointMatcherPolicy(DynamicControllerEndpointSelector selector, EndpointMetadataComparer comparer)
+        public DynamicControllerEndpointMatcherPolicy(DynamicControllerEndpointSelectorCache selectorCache, EndpointMetadataComparer comparer)
         {
-            if (selector == null)
+            if (selectorCache == null)
             {
-                throw new ArgumentNullException(nameof(selector));
+                throw new ArgumentNullException(nameof(selectorCache));
             }
 
             if (comparer == null)
@@ -30,7 +33,7 @@ namespace Microsoft.AspNetCore.Mvc.Routing
                 throw new ArgumentNullException(nameof(comparer));
             }
 
-            _selector = selector;
+            _selectorCache = selectorCache;
             _comparer = comparer;
         }
 
@@ -79,6 +82,9 @@ namespace Microsoft.AspNetCore.Mvc.Routing
                 throw new ArgumentNullException(nameof(candidates));
             }
 
+            // The per-route selector, must be the same for all the endpoints we are dealing with.
+            DynamicControllerEndpointSelector? selector = null;
+
             // There's no real benefit here from trying to avoid the async state machine.
             // We only execute on nodes that contain a dynamic policy, and thus always have
             // to await something.
@@ -90,16 +96,16 @@ namespace Microsoft.AspNetCore.Mvc.Routing
                 }
 
                 var endpoint = candidates[i].Endpoint;
-                var originalValues = candidates[i].Values;
+                var originalValues = candidates[i].Values!;
 
-                RouteValueDictionary dynamicValues = null;
+                RouteValueDictionary? dynamicValues = null;
 
                 // We don't expect both of these to be provided, and they are internal so there's
                 // no realistic way this could happen.
                 var dynamicControllerMetadata = endpoint.Metadata.GetMetadata<DynamicControllerMetadata>();
                 var transformerMetadata = endpoint.Metadata.GetMetadata<DynamicControllerRouteValueTransformerMetadata>();
 
-                DynamicRouteValueTransformer transformer = null;
+                DynamicRouteValueTransformer? transformer = null;
                 if (dynamicControllerMetadata != null)
                 {
                     dynamicValues = dynamicControllerMetadata.Values;
@@ -127,7 +133,9 @@ namespace Microsoft.AspNetCore.Mvc.Routing
                     continue;
                 }
 
-                var endpoints = _selector.SelectEndpoints(dynamicValues);
+                selector = ResolveSelector(selector, endpoint);
+
+                var endpoints = selector.SelectEndpoints(dynamicValues);
                 if (endpoints.Count == 0 && dynamicControllerMetadata != null)
                 {
                     // Naving no match for a fallback is a configuration error. We can't really check
@@ -171,6 +179,15 @@ namespace Microsoft.AspNetCore.Mvc.Routing
                 // Expand the list of endpoints
                 candidates.ExpandEndpoint(i, endpoints, _comparer);
             }
+        }
+
+        private DynamicControllerEndpointSelector ResolveSelector(DynamicControllerEndpointSelector? currentSelector, Endpoint endpoint)
+        {
+            var selector = _selectorCache.GetEndpointSelector(endpoint);
+
+            Debug.Assert(currentSelector == null || ReferenceEquals(currentSelector, selector));
+
+            return selector;
         }
     }
 }

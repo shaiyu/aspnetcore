@@ -2,30 +2,33 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Components.RenderTree;
 using Microsoft.AspNetCore.Components.Routing;
 using Microsoft.AspNetCore.Components.Test.Helpers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
 using Xunit;
-using Microsoft.AspNetCore.Components;
 
 namespace Microsoft.AspNetCore.Components.Test.Routing
 {
     public class RouterTest
     {
         private readonly Router _router;
+        private readonly TestNavigationManager _navigationManager;
         private readonly TestRenderer _renderer;
 
         public RouterTest()
         {
             var services = new ServiceCollection();
+            _navigationManager = new TestNavigationManager();
             services.AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance);
-            services.AddSingleton<NavigationManager, TestNavigationManager>();
+            services.AddSingleton<NavigationManager>(_navigationManager);
             services.AddSingleton<INavigationInterception, TestNavigationInterception>();
             var serviceProvider = services.BuildServiceProvider();
 
@@ -33,7 +36,7 @@ namespace Microsoft.AspNetCore.Components.Test.Routing
             _renderer.ShouldHandleExceptions = true;
             _router = (Router)_renderer.InstantiateComponent<Router>();
             _router.AppAssembly = Assembly.GetExecutingAssembly();
-            _router.Found = routeData => (builder) => builder.AddContent(0, "Rendering route...");
+            _router.Found = routeData => (builder) => builder.AddContent(0, $"Rendering route matching {routeData.PageType}");
             _renderer.AssignRootComponentId(_router);
         }
 
@@ -42,41 +45,18 @@ namespace Microsoft.AspNetCore.Components.Test.Routing
         {
             // Arrange
             var called = false;
-            async Task OnNavigateAsync(NavigationContext args)
+            Action<NavigationContext> OnNavigateAsync = async (NavigationContext args) =>
             {
                 await Task.CompletedTask;
                 called = true;
-            }
-            _router.OnNavigateAsync = OnNavigateAsync;
+            };
+            _router.OnNavigateAsync = new EventCallback<NavigationContext>(null, OnNavigateAsync);
 
             // Act
-            await _renderer.Dispatcher.InvokeAsync(() => _router.RunOnNavigateWithRefreshAsync("http://example.com/jan", false));
+            await _renderer.Dispatcher.InvokeAsync(() => _router.RunOnNavigateAsync("http://example.com/jan", false));
 
             // Assert
             Assert.True(called);
-        }
-
-        [Fact]
-        public async Task CanHandleSingleFailedOnNavigateAsync()
-        {
-            // Arrange
-            var called = false;
-            async Task OnNavigateAsync(NavigationContext args)
-            {
-                called = true;
-                await Task.CompletedTask;
-                throw new Exception("This is an uncaught exception.");
-            }
-            _router.OnNavigateAsync = OnNavigateAsync;
-
-            // Act
-            await _renderer.Dispatcher.InvokeAsync(() => _router.RunOnNavigateWithRefreshAsync("http://example.com/jan", false));
-
-            // Assert
-            Assert.True(called);
-            Assert.Single(_renderer.HandledExceptions);
-            var unhandledException = _renderer.HandledExceptions[0];
-            Assert.Equal("This is an uncaught exception.", unhandledException.Message);
         }
 
         [Fact]
@@ -84,30 +64,26 @@ namespace Microsoft.AspNetCore.Components.Test.Routing
         {
             // Arrange
             var onNavigateInvoked = 0;
-            async Task OnNavigateAsync(NavigationContext args)
+            Action<NavigationContext> OnNavigateAsync = async (NavigationContext args) =>
             {
                 onNavigateInvoked += 1;
-                if (args.Path.EndsWith("jan"))
+                if (args.Path.EndsWith("jan", StringComparison.Ordinal))
                 {
                     await Task.Delay(Timeout.Infinite, args.CancellationToken);
                     throw new Exception("This is an uncaught exception.");
                 }
-            }
-            var refreshCalled = false;
+            };
+            var refreshCalled = 0;
             _renderer.OnUpdateDisplay = (renderBatch) =>
             {
-                if (!refreshCalled)
-                {
-                    refreshCalled = true;
-                    return;
-                }
-                Assert.True(false, "OnUpdateDisplay called more than once.");
+                refreshCalled += 1;
+                return;
             };
-            _router.OnNavigateAsync = OnNavigateAsync;
+            _router.OnNavigateAsync = new EventCallback<NavigationContext>(null, OnNavigateAsync);
 
             // Act
-            var janTask = _renderer.Dispatcher.InvokeAsync(() => _router.RunOnNavigateWithRefreshAsync("http://example.com/jan", false));
-            var febTask = _renderer.Dispatcher.InvokeAsync(() => _router.RunOnNavigateWithRefreshAsync("http://example.com/feb", false));
+            var janTask = _renderer.Dispatcher.InvokeAsync(() => _router.RunOnNavigateAsync("http://example.com/jan", false));
+            var febTask = _renderer.Dispatcher.InvokeAsync(() => _router.RunOnNavigateAsync("http://example.com/feb", false));
 
             await janTask;
             await febTask;
@@ -115,28 +91,7 @@ namespace Microsoft.AspNetCore.Components.Test.Routing
             // Assert that we render the second route component and don't throw an exception
             Assert.Empty(_renderer.HandledExceptions);
             Assert.Equal(2, onNavigateInvoked);
-        }
-
-        [Fact]
-        public async Task CanHandleSingleCancelledOnNavigateAsync()
-        {
-            // Arrange
-            async Task OnNavigateAsync(NavigationContext args)
-            {
-                var tcs = new TaskCompletionSource<int>();
-                tcs.TrySetCanceled();
-                await tcs.Task;
-            }
-            _renderer.OnUpdateDisplay = (renderBatch) => Assert.True(false, "OnUpdateDisplay called more than once.");
-            _router.OnNavigateAsync = OnNavigateAsync;
-
-            // Act
-            await _renderer.Dispatcher.InvokeAsync(() => _router.RunOnNavigateWithRefreshAsync("http://example.com/jan", false));
-
-            // Assert
-            Assert.Single(_renderer.HandledExceptions);
-            var unhandledException = _renderer.HandledExceptions[0];
-            Assert.Equal("OnNavigateAsync can only be cancelled via NavigateContext.CancellationToken.", unhandledException.Message);
+            Assert.Equal(2, refreshCalled);
         }
 
         [Fact]
@@ -144,16 +99,16 @@ namespace Microsoft.AspNetCore.Components.Test.Routing
         {
             // Arrange
             var triggerCancel = new TaskCompletionSource();
-            async Task OnNavigateAsync(NavigationContext args)
+            Action<NavigationContext> OnNavigateAsync = async (NavigationContext args) =>
             {
-                if (args.Path.EndsWith("jan"))
+                if (args.Path.EndsWith("jan", StringComparison.Ordinal))
                 {
                     var tcs = new TaskCompletionSource();
                     await triggerCancel.Task;
                     tcs.TrySetCanceled();
                     await tcs.Task;
                 }
-            }
+            };
             var refreshCalled = false;
             _renderer.OnUpdateDisplay = (renderBatch) =>
             {
@@ -164,11 +119,11 @@ namespace Microsoft.AspNetCore.Components.Test.Routing
                 }
                 Assert.True(false, "OnUpdateDisplay called more than once.");
             };
-            _router.OnNavigateAsync = OnNavigateAsync;
+            _router.OnNavigateAsync = new EventCallback<NavigationContext>(null, OnNavigateAsync);
 
             // Act (start the operations then await them)
-            var jan = _renderer.Dispatcher.InvokeAsync(() => _router.RunOnNavigateWithRefreshAsync("http://example.com/jan", false));
-            var feb = _renderer.Dispatcher.InvokeAsync(() => _router.RunOnNavigateWithRefreshAsync("http://example.com/feb", false));
+            var jan = _renderer.Dispatcher.InvokeAsync(() => _router.RunOnNavigateAsync("http://example.com/jan", false));
+            var feb = _renderer.Dispatcher.InvokeAsync(() => _router.RunOnNavigateAsync("http://example.com/feb", false));
             triggerCancel.TrySetResult();
 
             await jan;
@@ -180,16 +135,16 @@ namespace Microsoft.AspNetCore.Components.Test.Routing
         {
             // Arrange
             var cancelled = "";
-            async Task OnNavigateAsync(NavigationContext args)
+            Action<NavigationContext> OnNavigateAsync = async (NavigationContext args) =>
             {
                 await Task.CompletedTask;
                 args.CancellationToken.Register(() => cancelled = args.Path);
             };
-            _router.OnNavigateAsync = OnNavigateAsync;
+            _router.OnNavigateAsync = new EventCallback<NavigationContext>(null, OnNavigateAsync);
 
             // Act
-            _ = _router.RunOnNavigateWithRefreshAsync("jan", false);
-            _ = _router.RunOnNavigateWithRefreshAsync("feb", false);
+            _ = _router.RunOnNavigateAsync("jan", false);
+            _ = _router.RunOnNavigateAsync("feb", false);
 
             // Assert
             var expected = "jan";
@@ -200,9 +155,9 @@ namespace Microsoft.AspNetCore.Components.Test.Routing
         public async Task RefreshesOnceOnCancelledOnNavigateAsync()
         {
             // Arrange
-            async Task OnNavigateAsync(NavigationContext args)
+            Action<NavigationContext> OnNavigateAsync = async (NavigationContext args) =>
             {
-                if (args.Path.EndsWith("jan"))
+                if (args.Path.EndsWith("jan", StringComparison.Ordinal))
                 {
                     await Task.Delay(Timeout.Infinite, args.CancellationToken);
                 }
@@ -217,14 +172,61 @@ namespace Microsoft.AspNetCore.Components.Test.Routing
                 }
                 Assert.True(false, "OnUpdateDisplay called more than once.");
             };
-            _router.OnNavigateAsync = OnNavigateAsync;
+            _router.OnNavigateAsync = new EventCallback<NavigationContext>(null, OnNavigateAsync);
 
             // Act
-            var jan = _renderer.Dispatcher.InvokeAsync(() => _router.RunOnNavigateWithRefreshAsync("http://example.com/jan", false));
-            var feb = _renderer.Dispatcher.InvokeAsync(() => _router.RunOnNavigateWithRefreshAsync("http://example.com/feb", false));
+            var jan = _renderer.Dispatcher.InvokeAsync(() => _router.RunOnNavigateAsync("http://example.com/jan", false));
+            var feb = _renderer.Dispatcher.InvokeAsync(() => _router.RunOnNavigateAsync("http://example.com/feb", false));
 
             await jan;
             await feb;
+        }
+
+        [Fact]
+        public async Task UsesLegacyRouteMatchingByDefault()
+        {
+            // Arrange
+            // Legacy routing prefers {*someWildcard} over any other pattern than has more segments,
+            // even if the other pattern is an exact match
+            _navigationManager.NotifyLocationChanged("https://www.example.com/subdir/a/b", false);
+            var parameters = new Dictionary<string, object>
+            {
+                { nameof(Router.AppAssembly), typeof(RouterTest).Assembly },
+                { nameof(Router.NotFound), (RenderFragment)(builder => { }) },
+            };
+
+            // Act
+            await _renderer.Dispatcher.InvokeAsync(() =>
+                _router.SetParametersAsync(ParameterView.FromDictionary(parameters)));
+
+            // Assert
+            var renderedFrame = _renderer.Batches.First().ReferenceFrames.First();
+            Assert.Equal(RenderTreeFrameType.Text, renderedFrame.FrameType);
+            Assert.Equal($"Rendering route matching {typeof(MatchAnythingComponent)}", renderedFrame.TextContent);
+        }
+
+        [Fact]
+        public async Task UsesCurrentRouteMatchingIfSpecified()
+        {
+            // Arrange
+            // Current routing prefers exactly-matched patterns over {*someWildcard}, no matter
+            // how many segments are in the exact match
+            _navigationManager.NotifyLocationChanged("https://www.example.com/subdir/a/b", false);
+            var parameters = new Dictionary<string, object>
+            {
+                { nameof(Router.AppAssembly), typeof(RouterTest).Assembly },
+                { nameof(Router.NotFound), (RenderFragment)(builder => { }) },
+                { nameof(Router.PreferExactMatches), true },
+            };
+
+            // Act
+            await _renderer.Dispatcher.InvokeAsync(() =>
+                _router.SetParametersAsync(ParameterView.FromDictionary(parameters)));
+
+            // Assert
+            var renderedFrame = _renderer.Batches.First().ReferenceFrames.First();
+            Assert.Equal(RenderTreeFrameType.Text, renderedFrame.FrameType);
+            Assert.Equal($"Rendering route matching {typeof(MultiSegmentRouteComponent)}", renderedFrame.TextContent);
         }
 
         internal class TestNavigationManager : NavigationManager
@@ -233,6 +235,12 @@ namespace Microsoft.AspNetCore.Components.Test.Routing
                 Initialize("https://www.example.com/subdir/", "https://www.example.com/subdir/jan");
 
             protected override void NavigateToCore(string uri, bool forceLoad) => throw new NotImplementedException();
+
+            public void NotifyLocationChanged(string uri, bool intercepted)
+            {
+                Uri = uri;
+                NotifyLocationChanged(intercepted);
+            }
         }
 
         internal sealed class TestNavigationInterception : INavigationInterception
@@ -250,5 +258,11 @@ namespace Microsoft.AspNetCore.Components.Test.Routing
 
         [Route("jan")]
         public class JanComponent : ComponentBase { }
+
+        [Route("{*matchAnything}")]
+        public class MatchAnythingComponent : ComponentBase { }
+
+        [Route("a/b")]
+        public class MultiSegmentRouteComponent : ComponentBase { }
     }
 }

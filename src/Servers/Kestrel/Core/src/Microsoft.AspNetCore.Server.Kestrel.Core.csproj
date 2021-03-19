@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <Description>Core components of ASP.NET Core Kestrel cross-platform web server.</Description>
@@ -10,6 +10,7 @@
     <NoWarn>CS1591;$(NoWarn)</NoWarn>
     <IsPackable>false</IsPackable>
     <DefineConstants>$(DefineConstants);KESTREL</DefineConstants>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
 
   <ItemGroup>
