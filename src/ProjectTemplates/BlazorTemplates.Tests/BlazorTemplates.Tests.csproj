@@ -6,7 +6,6 @@
 
     <RunTemplateTests Condition="'$(RunTemplateTests)' == ''">true</RunTemplateTests>
     <SkipTests Condition="'$(RunTemplateTests)' != 'true'">true</SkipTests>
-    <SkipHelixArm>true</SkipHelixArm>
     <BaseOutputPath />
     <OutputPath />
 
@@ -14,7 +13,7 @@
     <!-- TestTemplateCreationFolder is the folder where the templates will be created. Will point out to $(OutputDir)$(TestTemplateCreationFolder) -->
     <TestTemplateCreationFolder>TestTemplates\</TestTemplateCreationFolder>
     <TestPackageRestorePath>$([MSBuild]::EnsureTrailingSlash('$(RepoRoot)'))obj\template-restore\</TestPackageRestorePath>
-    <TestDependsOnAspNetRuntime>true</TestDependsOnAspNetRuntime>
+    <TestDependsOnAspNetPackages>true</TestDependsOnAspNetPackages>
     <TestDependsOnMssql>true</TestDependsOnMssql>
     <TestDependsOnPlaywright>true</TestDependsOnPlaywright>
   </PropertyGroup>
@@ -63,7 +62,7 @@
     <ItemGroup>
       <_PublishFiles Include="$(OutputPath).playwright\**\*.*" />
     </ItemGroup>
-    <Copy SourceFiles="@(_PublishFiles)" DestinationFolder="$(PublishDir)\.playwright\%(_PublishFiles.RecursiveDir)\" />	
+    <Copy SourceFiles="@(_PublishFiles)" DestinationFolder="$(PublishDir)\.playwright\%(_PublishFiles.RecursiveDir)\" />
   </Target>
 
 

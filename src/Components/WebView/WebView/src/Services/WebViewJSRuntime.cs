@@ -8,8 +8,11 @@ namespace Microsoft.AspNetCore.Components.WebView.Services
     {
         private IpcSender _ipcSender;
 
+        public ElementReferenceContext ElementReferenceContext { get; }
+
         public WebViewJSRuntime()
         {
+            ElementReferenceContext = new WebElementReferenceContext(this);
             JsonSerializerOptions.Converters.Add(
                 new ElementReferenceJsonConverter(
                     new WebElementReferenceContext(this)));
@@ -19,6 +22,8 @@ namespace Microsoft.AspNetCore.Components.WebView.Services
         {
             _ipcSender = ipcSender;
         }
+
+        public JsonSerializerOptions ReadJsonSerializerOptions() => JsonSerializerOptions;
 
         protected override void BeginInvokeJS(long taskId, string identifier, string argsJson, JSCallResultType resultType, long targetInstanceId)
         {

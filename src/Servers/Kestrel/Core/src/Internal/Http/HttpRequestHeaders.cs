@@ -121,13 +121,13 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
         [MethodImpl(MethodImplOptions.NoInlining)]
         private void SetValueUnknown(string key, StringValues value)
         {
-            Unknown[key] = value;
+            Unknown[GetInternedHeaderName(key)] = value;
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
         private bool AddValueUnknown(string key, StringValues value)
         {
-            Unknown.Add(key, value);
+            Unknown.Add(GetInternedHeaderName(key), value);
             // Return true, above will throw and exit for false
             return true;
         }
@@ -135,6 +135,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
         [MethodImpl(MethodImplOptions.NoInlining)]
         private unsafe void AppendUnknownHeaders(string name, string valueString)
         {
+            name = GetInternedHeaderName(name);
             Unknown.TryGetValue(name, out var existing);
             Unknown[name] = AppendValue(existing, valueString);
         }
@@ -155,7 +156,6 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
             private readonly long _bits;
             private int _next;
             private KeyValuePair<string, StringValues> _current;
-            private KnownHeaderType _currentKnownType;
             private readonly bool _hasUnknown;
             private Dictionary<string, StringValues>.Enumerator _unknownEnumerator;
 
@@ -165,7 +165,6 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
                 _bits = collection._bits;
                 _next = 0;
                 _current = default;
-                _currentKnownType = default;
                 _hasUnknown = collection.MaybeUnknown != null;
                 _unknownEnumerator = _hasUnknown
                     ? collection.MaybeUnknown!.GetEnumerator()
@@ -173,8 +172,6 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
             }
 
             public KeyValuePair<string, StringValues> Current => _current;
-
-            internal KnownHeaderType CurrentKnownType => _currentKnownType;
 
             object IEnumerator.Current => _current;
 

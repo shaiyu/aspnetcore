@@ -1,8 +1,9 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>$(DefaultNetCoreTargetFramework)</TargetFramework>
     <RuntimeIdentifier>browser-wasm</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
+    <UseMonoRuntime>true</UseMonoRuntime>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="Microsoft.AspNetCore.Metadata" />
@@ -12,6 +13,8 @@
     <Reference Include="Microsoft.AspNetCore.Components.Forms" />
     <Reference Include="Microsoft.AspNetCore.Components.Web" />
     <Reference Include="Microsoft.AspNetCore.Components.WebAssembly" />
+    <Reference Include="Microsoft.AspNetCore.Components.WebAssembly.Authentication" />
+    <Reference Include="Microsoft.Authentication.WebAssembly.Msal" />
     <Reference Include="Microsoft.JSInterop" />
     <Reference Include="Microsoft.JSInterop.WebAssembly" />
   </ItemGroup>

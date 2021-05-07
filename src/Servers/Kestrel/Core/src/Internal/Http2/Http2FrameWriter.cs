@@ -30,7 +30,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http2
         private readonly Http2Frame _outgoingFrame;
         private readonly Http2HeadersEnumerator _headersEnumerator = new Http2HeadersEnumerator();
         private readonly ConcurrentPipeWriter _outputWriter;
-        private readonly ConnectionContext _connectionContext;
+        private readonly BaseConnectionContext _connectionContext;
         private readonly Http2Connection _http2Connection;
         private readonly OutputFlowControl _connectionOutputFlowControl;
         private readonly string _connectionId;
@@ -38,7 +38,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http2
         private readonly ITimeoutControl _timeoutControl;
         private readonly MinDataRate? _minResponseDataRate;
         private readonly TimingPipeFlusher _flusher;
-        private readonly HPackEncoder _hpackEncoder;
+        private readonly DynamicHPackEncoder _hpackEncoder;
 
         private uint _maxFrameSize = Http2PeerSettings.MinAllowedMaxFrameSize;
         private byte[] _headerEncodingBuffer;
@@ -49,7 +49,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http2
 
         public Http2FrameWriter(
             PipeWriter outputPipeWriter,
-            ConnectionContext connectionContext,
+            BaseConnectionContext connectionContext,
             Http2Connection http2Connection,
             OutputFlowControl connectionOutputFlowControl,
             ITimeoutControl timeoutControl,
@@ -71,7 +71,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http2
             _outgoingFrame = new Http2Frame();
             _headerEncodingBuffer = new byte[_maxFrameSize];
 
-            _hpackEncoder = new HPackEncoder(serviceContext.ServerOptions.AllowResponseHeaderCompression);
+            _hpackEncoder = new DynamicHPackEncoder(serviceContext.ServerOptions.AllowResponseHeaderCompression);
         }
 
         public void UpdateMaxHeaderTableSize(uint maxHeaderTableSize)

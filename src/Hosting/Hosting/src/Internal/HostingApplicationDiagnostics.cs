@@ -24,16 +24,15 @@ namespace Microsoft.AspNetCore.Hosting
         private const string DeprecatedDiagnosticsEndRequestKey = "Microsoft.AspNetCore.Hosting.EndRequest";
         private const string DiagnosticsUnhandledExceptionKey = "Microsoft.AspNetCore.Hosting.UnhandledException";
 
-        private const string ActivitySourceName = "Microsoft.AspNetCore.Hosting";
-        private static readonly ActivitySource _activitySource = new ActivitySource(ActivitySourceName);
-
+        private readonly ActivitySource _activitySource;
         private readonly DiagnosticListener _diagnosticListener;
         private readonly ILogger _logger;
 
-        public HostingApplicationDiagnostics(ILogger logger, DiagnosticListener diagnosticListener)
+        public HostingApplicationDiagnostics(ILogger logger, DiagnosticListener diagnosticListener, ActivitySource activitySource)
         {
             _logger = logger;
             _diagnosticListener = diagnosticListener;
+            _activitySource = activitySource;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -265,15 +264,17 @@ namespace Microsoft.AspNetCore.Hosting
             }
 
             var headers = httpContext.Request.Headers;
-            if (!headers.TryGetValue(HeaderNames.TraceParent, out var requestId))
+            var requestId = headers.TraceParent;
+            if (requestId.Count == 0)
             {
-                headers.TryGetValue(HeaderNames.RequestId, out requestId);
+                requestId = headers.RequestId;
             }
 
             if (!StringValues.IsNullOrEmpty(requestId))
             {
                 activity.SetParentId(requestId);
-                if (headers.TryGetValue(HeaderNames.TraceState, out var traceState))
+                var traceState = headers.TraceState;
+                if (traceState.Count > 0)
                 {
                     activity.TraceStateString = traceState;
                 }

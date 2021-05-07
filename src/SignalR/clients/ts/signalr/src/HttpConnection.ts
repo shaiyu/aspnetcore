@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 import { DefaultHttpClient } from "./DefaultHttpClient";
+import { HttpError } from "./Errors";
 import { HttpClient } from "./HttpClient";
 import { IConnection } from "./IConnection";
 import { IHttpConnectionOptions } from "./IHttpConnectionOptions";
@@ -52,7 +53,7 @@ export class HttpConnection implements IConnection {
     private transport?: ITransport;
     private _startInternalPromise?: Promise<void>;
     private _stopPromise?: Promise<void>;
-    private _stopPromiseResolver!: (value?: PromiseLike<void>) => void;
+    private _stopPromiseResolver: (value?: PromiseLike<void>) => void = () => {};
     private _stopError?: Error;
     private _accessTokenFactory?: () => string | Promise<string>;
     private _sendQueue?: TransportSendQueue;
@@ -215,7 +216,6 @@ export class HttpConnection implements IConnection {
             this.transport = undefined;
         } else {
             this._logger.log(LogLevel.Debug, "HttpConnection.transport is undefined in HttpConnection.stop() because start() failed.");
-            this._stopConnection();
         }
     }
 
@@ -295,6 +295,9 @@ export class HttpConnection implements IConnection {
             this._logger.log(LogLevel.Error, "Failed to start the connection: " + e);
             this._connectionState = ConnectionState.Disconnected;
             this.transport = undefined;
+
+            // if start fails, any active calls to stop assume that start will complete the stop promise
+            this._stopPromiseResolver();
             return Promise.reject(e);
         }
     }
@@ -332,8 +335,15 @@ export class HttpConnection implements IConnection {
             }
             return negotiateResponse;
         } catch (e) {
-            this._logger.log(LogLevel.Error, "Failed to complete negotiation with the server: " + e);
-            return Promise.reject(e);
+            let errorMessage = "Failed to complete negotiation with the server: " + e;
+            if (e instanceof HttpError) {
+                if (e.statusCode === 404) {
+                    errorMessage = errorMessage + " Either this is not a SignalR endpoint or there is a proxy blocking the connection.";
+                }
+            }
+            this._logger.log(LogLevel.Error, errorMessage);
+
+            return Promise.reject(new Error(errorMessage));
         }
     }
 

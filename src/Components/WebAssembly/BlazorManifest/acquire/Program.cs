@@ -25,22 +25,18 @@ namespace acquire
 
         static int Main(string[] args)
         {
-            System.Console.WriteLine(MuxerPath);
             var sdkDirectory = args.Length > 0 ? args[0] : Path.GetDirectoryName(MuxerPath);
             var tempDirectory = Path.Combine(Directory.GetCurrentDirectory(), "tmp", Path.GetRandomFileName());
             var restoreDirectory = Path.Combine(tempDirectory, ".nuget");
 
             try
             {
-                var restore = Restore(tempDirectory, restoreDirectory, out var packs);
+                var packs = GetPacks(sdkDirectory);
+                var restore = RestorePacks(tempDirectory, restoreDirectory, packs);
                 if (restore != 0)
                 {
                     return restore;
                 }
-
-                var sourceManifestDirectory = Path.Combine(restoreDirectory, "microsoft.net.sdk.blazorwebassembly.aot", ManifestVersion);
-                var targetManifestDirectory = Path.Combine(sdkDirectory, "sdk-manifests", ManifestVersion, "Microsoft.NET.Sdk.BlazorWebAssembly.AOT");
-                Move(sourceManifestDirectory, targetManifestDirectory);
 
                 foreach (var (id, version) in packs)
                 {
@@ -59,7 +55,7 @@ namespace acquire
                 sdkVersionProc.WaitForExit();
                 var sdkVersion = sdkVersionProc.StandardOutput.ReadToEnd().Trim();
                 var sentinelPath = Path.Combine(sdkDirectory, "sdk", sdkVersion, "EnableWorkloadResolver.sentinel");
-                Console.WriteLine($"Writing sentinel to {sentinelPath}.");
+                Console.WriteLine($"Enabling Workloads support in dotnet SDK v{sdkVersion}.");
 
                 File.WriteAllBytes(sentinelPath, Array.Empty<byte>());
             }
@@ -84,10 +80,53 @@ namespace acquire
             Directory.Move(source, destination);
         }
 
-        static int Restore(string tempDirectory, string restoreDirectory, out List<(string, string)> packs)
+        static List<(string Id, string Version)> GetPacks(string sdkDirectory)
         {
-            packs = null;
+            var manifestDirectory = Path.Combine(sdkDirectory, "sdk-manifests", ManifestVersion, "Microsoft.NET.Workload.BlazorWebAssembly");
+            if (!Directory.Exists(manifestDirectory))
+            {
+                throw new DirectoryNotFoundException($"Cound not find directory {manifestDirectory}. A 6.0-preview3 SDK or newer is required for this tool to function.");
+            }
 
+            var manifestPath = Path.Combine(manifestDirectory, "WorkloadManifest.json");
+            var manifest = JsonSerializer.Deserialize<PackInformation>(File.ReadAllBytes(manifestPath), new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            var packs = new List<(string, string)>();
+            foreach (var item in manifest.Packs)
+            {
+                var packageName = item.Key;
+                if (item.Value.AliasTo is Dictionary<string, string> alias)
+                {
+                    packageName = ""; // if this is an alias pack and platform isn't in the alias it isn't required
+
+                    if (OperatingSystem.IsWindows())
+                    {
+                        alias.TryGetValue(Environment.Is64BitProcess ? "win-x64" : "win-x86", out packageName);
+                    }
+                    else if (OperatingSystem.IsMacOS())
+                    {
+                        alias.TryGetValue("osx-x64", out packageName);
+                    }
+                    else if (OperatingSystem.IsLinux())
+                    {
+                        alias.TryGetValue("linux-x64", out packageName);
+                    }
+                    else
+                    {
+                        throw new NotSupportedException("Unsupported OS platform.");
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(packageName))
+                {
+                    packs.Add((packageName, item.Value.Version));
+                }
+            }
+
+            return packs;
+        }
+
+        static int RestorePacks(string tempDirectory, string restoreDirectory, List<(string Id, string Version)> packs)
+        {
             var restoreProject = Path.Combine(tempDirectory, "restore", "Restore.csproj");
             var restoreProjectDirectory = Directory.CreateDirectory(Path.GetDirectoryName(restoreProject));
 
@@ -98,75 +137,13 @@ namespace acquire
 <Project Sdk=""Microsoft.NET.Sdk"">
     <PropertyGroup>
         <TargetFramework>net6.0</TargetFramework>
-    </PropertyGroup>
-    <ItemGroup>
-        <PackageReference Include=""Microsoft.NET.Sdk.BlazorWebAssembly.AOT"" Version=""6.0.0-*"" />
-    </ItemGroup>
-</Project>
-";
-            File.WriteAllText(restoreProject, projectFile);
-
-            Console.WriteLine("Restoring...");
-
-            var process = Process.Start(new ProcessStartInfo
-            {
-                FileName = MuxerPath,
-                ArgumentList = { "restore", restoreProject },
-                Environment =
-                {
-                    ["NUGET_PACKAGES"] = restoreDirectory,
-                },
-            });
-            process.WaitForExit();
-            if (process.ExitCode != 0)
-            {
-                Console.Error.WriteLine("Unable to restore Microsoft.NET.Sdk.BlazorWebAssembly.AOT workload.");
-                return 1;
-            }
-
-            var manifestDirectory = Path.Combine(restoreDirectory, "microsoft.net.sdk.blazorwebassembly.aot");
-            var version = Directory.EnumerateDirectories(manifestDirectory).First();
-
-            manifestDirectory = Path.Combine(manifestDirectory, ManifestVersion);
-            Directory.Move(version, manifestDirectory);
-
-            var manifestPath = Path.Combine(manifestDirectory, "WorkloadManifest.json");
-            var manifest = JsonSerializer.Deserialize<PackInformation>(File.ReadAllBytes(manifestPath), new JsonSerializerOptions(JsonSerializerDefaults.Web));
-
-            projectFile = @"
-<Project Sdk=""Microsoft.NET.Sdk"">
-    <PropertyGroup>
-        <TargetFramework>net6.0</TargetFramework>
         <NoWarn>$(NoWarn);NU1213</NoWarn>
     </PropertyGroup>
     <ItemGroup>
 ";
-            packs = new List<(string id, string version)>();
-            foreach (var item in manifest.Packs)
+            foreach (var (Id, Version) in packs)
             {
-                var packageName = item.Key;
-                if (item.Value.AliasTo is Dictionary<string, string> alias)
-                {
-                    if (OperatingSystem.IsWindows())
-                    {
-                        packageName = Environment.Is64BitProcess ? alias["win-x64"] : alias["win-x86"];
-                    }
-                    else if (OperatingSystem.IsMacOS())
-                    {
-                        packageName = alias["osx-x64"];
-                    }
-                    else if (OperatingSystem.IsLinux())
-                    {
-                        packageName = alias["linux-x64"];
-                    }
-                    else
-                    {
-                        Console.Error.WriteLine("Unsupported platform.");
-                        return 1;
-                    }
-                }
-                projectFile += @$"<PackageReference Include=""{packageName}"" Version=""{item.Value.Version}"" />";
-                packs.Add((packageName, item.Value.Version));
+                projectFile += $"<PackageReference Include=\"{Id}\" Version=\"{Version}\" />";
             }
 
             projectFile += @"
@@ -175,20 +152,20 @@ namespace acquire
 ";
             File.WriteAllText(restoreProject, projectFile);
 
-            process = Process.Start(new ProcessStartInfo
+            var process = Process.Start(new ProcessStartInfo
             {
                 FileName = MuxerPath,
                 ArgumentList = { "restore", restoreProject },
+#if !DEBUG
                 RedirectStandardError = true,
                 RedirectStandardOutput = true,
+#endif
                 Environment =
                 {
                     ["NUGET_PACKAGES"] = restoreDirectory,
                 },
             });
             process.WaitForExit();
-
-
             return 0;
         }
 
